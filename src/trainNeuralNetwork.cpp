@@ -141,7 +141,7 @@ int main(int argc, char** argv) {
     ValueArg<bool> init_normal("", "init_normal", "Initialize parameters from a normal distribution. 1 = normal, 0 = uniform. Default: 0.", false, 0, "bool", cmd);
 
     ValueArg<string> loss_function("", "loss_function", "Loss function (log, nce). Default: nce.", false, "nce", "string", cmd);
-    ValueArg<string> activation_function("", "activation_function", "Activation function (identity, rectifier, tanh, hardtanh). Default: rectifier.", false, "rectifier", "string", cmd);
+    ValueArg<string> activation_function("", "activation_function", "Activation function (identity, rectifier, tanh, hardtanh, sigmoid). Default: rectifier.", false, "rectifier", "string", cmd);
     ValueArg<int> num_hidden("", "num_hidden", "Number of hidden nodes. Default: 100.", false, 100, "int", cmd);
 
     ValueArg<bool> share_embeddings("", "share_embeddings", "Share input and output embeddings. 1 = yes, 0 = no. Default: 0.", false, 0, "bool", cmd);
@@ -446,6 +446,7 @@ int main(int argc, char** argv) {
               output_vocab_size, ngram_size, epoch,
               myParam.model_file, myParam.input_words_file,
               current_learning_rate, current_validation_ll);
+          cerr << "Current learning rate: " << current_learning_rate << endl;
           cerr << "Training minibatches: " << endl;
         }
       }
@@ -455,19 +456,6 @@ int main(int argc, char** argv) {
       Matrix<int, Dynamic, Dynamic> minibatch = training_data.middleCols(minibatch_start_index, current_minibatch_size);
 
       double adjusted_learning_rate = current_learning_rate / current_minibatch_size;
-            //cerr<<"Adjusted learning rate: "<<adjusted_learning_rate<<endl;
-
-            /*
-            if (batch == rand() % num_batches)
-            {
-                cerr<<"we are checking the gradient in batch "<<batch<<endl;
-                /////////////////////////CHECKING GRADIENTS////////////////////////////////////////
-                gradientChecking(myParam,minibatch_start_index,current_minibatch_size,word_nodes,context_nodes,hidden_layer_node,hidden_layer_to_output_node,
-                              shuffled_training_data,c_h,unif_real_vector,eng_real_vector,unif_int_vector,eng_int_vector,unigram_probs_vector,
-                              q_vector,J_vector,D_prime);
-            }
-            */
-
             ///// Forward propagation
       prop.fProp(minibatch.topRows(ngram_size-1));
 
