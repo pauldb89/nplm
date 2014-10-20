@@ -38,11 +38,11 @@ int main(int argc, char *argv[]) {
 
     ValueArg<string> arg_test_file("", "test_file", "Test file (one tokenized sentence per line).", true, "", "string", cmd);
 
-    ValueArg<string> arg_model_file("", "model_file", "Language model file.", true, "", "string", cmd);
+    ValueArg<string> arg_model_input_file("", "model_input_file", "Language model file.", true, "", "string", cmd);
 
     cmd.parse(argc, argv);
 
-    myParam.model_file = arg_model_file.getValue();
+    myParam.model_input_file = arg_model_input_file.getValue();
     myParam.test_file = arg_test_file.getValue();
 
     normalization = arg_normalization.getValue();
@@ -58,7 +58,7 @@ int main(int argc, char *argv[]) {
 
     const string sep(" Value: ");
     cerr << arg_test_file.getDescription() << sep << arg_test_file.getValue() << endl;
-    cerr << arg_model_file.getDescription() << sep << arg_model_file.getValue() << endl;
+    cerr << arg_model_input_file.getDescription() << sep << arg_model_input_file.getValue() << endl;
 
     cerr << arg_normalization.getDescription() << sep << arg_normalization.getValue() << endl;
     cerr << arg_ngramize.getDescription() << sep << arg_ngramize.getValue() << endl;
@@ -75,7 +75,7 @@ int main(int argc, char *argv[]) {
 
   ///// Create language model
 
-  neuralLM lm(myParam.model_file);
+  neuralLM lm(myParam.model_input_file);
   lm.set_normalization(normalization);
   lm.set_cache(1048576);
   int ngram_size = lm.get_order();

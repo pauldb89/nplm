@@ -47,7 +47,7 @@ void EvaluateModel(
     const Map<Matrix<int,Dynamic,Dynamic> >& validation_data,
     int validation_data_size, int validation_minibatch_size,
     int num_validation_batches, int output_vocab_size, int ngram_size,
-    int epoch, const string& model_file, const string& input_words_file,
+    int epoch, const string& model_output_file, const string& input_words_file,
     double& current_learning_rate, double& current_validation_ll) {
   if (validation_data_size > 0) {
     double log_likelihood = 0.0;
@@ -95,12 +95,12 @@ void EvaluateModel(
     } else {
       current_validation_ll = log_likelihood;
 
-      if (model_file != "") {
+      if (model_output_file != "") {
         cerr << "Writing model" << endl;
         if (input_words_file != "") {
-          nn.write(model_file, input_words, output_words);
+          nn.write(model_output_file, input_words, output_words);
         } else {
-          nn.write(model_file);
+          nn.write(model_output_file);
         }
       }
     }
@@ -154,7 +154,8 @@ int main(int argc, char** argv) {
     ValueArg<int> output_vocab_size("", "output_vocab_size", "Vocabulary size. Default: auto.", false, 0, "int", cmd);
     ValueArg<int> ngram_size("", "ngram_size", "Size of n-grams. Default: auto.", false, 0, "int", cmd);
 
-    ValueArg<string> model_file("", "model_file", "Prefix for output model files." , false, "", "string", cmd);
+    ValueArg<string> model_input_file("", "model_input_file", "Model input file", false, "", "string", cmd);
+    ValueArg<string> model_output_file("", "model_output_file", "Model output file" , false, "", "string", cmd);
     ValueArg<string> words_file("", "words_file", "Vocabulary." , false, "", "string", cmd);
     ValueArg<string> input_words_file("", "input_words_file", "Vocabulary." , false, "", "string", cmd);
     ValueArg<string> output_words_file("", "output_words_file", "Vocabulary." , false, "", "string", cmd);
@@ -172,7 +173,8 @@ int main(int argc, char** argv) {
       myParam.input_words_file = myParam.output_words_file = words_file.getValue();
     }
 
-    myParam.model_file = model_file.getValue();
+    myParam.model_input_file = model_input_file.getValue();
+    myParam.model_output_file = model_output_file.getValue();
 
     myParam.ngram_size = ngram_size.getValue();
     myParam.vocab_size = vocab_size.getValue();
@@ -219,7 +221,8 @@ int main(int argc, char** argv) {
     cerr << input_words_file.getDescription() << sep << input_words_file.getValue() << endl;
     cerr << output_words_file.getDescription() << sep << output_words_file.getValue() << endl;
     cerr << words_file.getDescription() << sep << words_file.getValue() << endl;
-    cerr << model_file.getDescription() << sep << model_file.getValue() << endl;
+    cerr << model_input_file.getDescription() << sep << model_input_file.getValue() << endl;
+    cerr << model_output_file.getDescription() << sep << model_output_file.getValue() << endl;
 
     cerr << ngram_size.getDescription() << sep << ngram_size.getValue() << endl;
     cerr << input_vocab_size.getDescription() << sep << input_vocab_size.getValue() << endl;
@@ -357,16 +360,21 @@ int main(int argc, char** argv) {
 
   ///// Create and initialize the neural network and associated propagators.
 
-  model nn(myParam.ngram_size,
-      myParam.input_vocab_size,
-      myParam.output_vocab_size,
-      myParam.input_embedding_dimension,
-      myParam.num_hidden,
-      myParam.output_embedding_dimension,
-      myParam.share_embeddings);
+  model nn;
+  if (myParam.model_input_file == "") {
+    nn = model(
+        myParam.ngram_size, myParam.input_vocab_size, myParam.output_vocab_size,
+        myParam.input_embedding_dimension, myParam.num_hidden,
+        myParam.output_embedding_dimension, myParam.share_embeddings);
+    nn.initialize(rng, myParam.init_normal, myParam.init_range, -log(myParam.output_vocab_size));
+    nn.set_activation_function(string_to_activation_function(myParam.activation_function));
+  } else {
+    cerr << "Reading model from " << myParam.model_input_file << endl;
+    vector<string> input_words, output_words;
+    nn.read(myParam.model_input_file, input_words, output_words);
+    cerr << "Done reading model..." << endl;
+  }
 
-  nn.initialize(rng, myParam.init_normal, myParam.init_range, -log(myParam.output_vocab_size));
-  nn.set_activation_function(string_to_activation_function(myParam.activation_function));
   loss_function_type loss_function = string_to_loss_function(myParam.loss_function);
 
   propagator prop(nn, myParam.minibatch_size);
@@ -436,7 +444,7 @@ int main(int argc, char** argv) {
     Matrix<double,Dynamic,Dynamic> probs(num_samples, minibatch_size);
 
     for (data_size_t batch = 0; batch < num_batches; batch++) {
-      if (batch > 0 && batch % 10000 == 0) {
+      if (batch % 10000 == 0) {
         cerr << batch << "... ";
         if (batch % 200000 == 0) {
           EvaluateModel(
@@ -444,7 +452,7 @@ int main(int argc, char** argv) {
               validation_data, validation_data_size,
               validation_minibatch_size, num_validation_batches,
               output_vocab_size, ngram_size, epoch,
-              myParam.model_file, myParam.input_words_file,
+              myParam.model_output_file, myParam.input_words_file,
               current_learning_rate, current_validation_ll);
           cerr << "Current learning rate: " << current_learning_rate << endl;
           cerr << "Training minibatches: " << endl;
@@ -577,7 +585,7 @@ int main(int argc, char** argv) {
         validation_data, validation_data_size,
         validation_minibatch_size, num_validation_batches,
         output_vocab_size, ngram_size, epoch,
-        myParam.input_words_file, myParam.model_file,
+        myParam.input_words_file, myParam.model_output_file,
         current_learning_rate, current_validation_ll);
   }
 

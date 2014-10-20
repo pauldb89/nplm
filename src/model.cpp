@@ -115,69 +115,58 @@ void model::readConfig(const string &filename)
     config_file.close();
 }
 
-void model::read(const string &filename)
-{
-    vector<string> input_words;
-    vector<string> output_words;
-    read(filename, input_words, output_words);
+void model::read(const string &filename) {
+  vector<string> input_words;
+  vector<string> output_words;
+  read(filename, input_words, output_words);
 }
 
-void model::read(const string &filename, vector<string> &input_words, vector<string> &output_words)
-{
-    ifstream file(filename.c_str());
-    if (!file) throw runtime_error("Could not open file " + filename);
+void model::read(
+    const string& filename,
+    vector<string>& input_words,
+    vector<string>& output_words) {
+  ifstream file(filename.c_str());
+  if (!file) {
+    throw runtime_error("Could not open file " + filename);
+  }
 
-    param myParam;
-    string line;
+  param myParam;
+  string line;
 
-    while (getline(file, line))
-    {
-	if (line == "\\config")
-	{
+  while (getline(file, line)) {
+  	if (line == "\\config") {
 	    readConfig(file);
-	}
-
-	else if (line == "\\vocab")
-	{
+	  } else if (line == "\\vocab") {
 	    input_words.clear();
 	    readWordsFile(file, input_words);
 	    output_words = input_words;
-	}
-
-	else if (line == "\\input_vocab")
-	{
+	  } else if (line == "\\input_vocab") {
 	    input_words.clear();
 	    readWordsFile(file, input_words);
-	}
-
-	else if (line == "\\output_vocab")
-	{
+	  } else if (line == "\\output_vocab") {
 	    output_words.clear();
 	    readWordsFile(file, output_words);
-	}
-
-	else if (line == "\\input_embeddings")
+	  } else if (line == "\\input_embeddings") {
 	    input_layer.read(file);
-	else if (line == "\\hidden_weights 1")
+    } else if (line == "\\hidden_weights 1") {
 	    first_hidden_linear.read(file);
-	else if (line == "\\hidden_weights 2")
+    } else if (line == "\\hidden_weights 2") {
 	    second_hidden_linear.read(file);
-	else if (line == "\\output_weights")
+    } else if (line == "\\output_weights") {
 	    output_layer.read_weights(file);
-	else if (line == "\\output_biases")
+    } else if (line == "\\output_biases") {
 	    output_layer.read_biases(file);
-	else if (line == "\\end")
+    } else if (line == "\\end") {
 	    break;
-	else if (line == "")
+    } else if (line == "") {
 	    continue;
-	else
-	{
+    } else {
 	    cerr << "warning: unrecognized section: " << line << endl;
 	    // skip over section
 	    while (getline(file, line) && line != "") { }
-	}
-    }
-    file.close();
+	  }
+  }
+  file.close();
 }
 
 void model::write(

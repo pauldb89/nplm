@@ -5,13 +5,14 @@
 namespace nplm
 {
 
-struct param 
+struct param
 {
     std::string train_file;
     std::string validation_file;
     std::string test_file;
 
-    std::string model_file;
+    std::string model_input_file;
+    std::string model_output_file;
 
     std::string unigram_probs_file;
     std::string words_file;
@@ -50,7 +51,7 @@ struct param
     double normalization_init;
 
     int num_threads;
-  
+
     bool share_embeddings;
 
 };
