@@ -311,7 +311,7 @@ int main(int argc, char** argv) {
   }
 
   // If neither --output_vocab_size nor --output_words_file is given, set output_vocab_size to the maximum word index
-  if (myParam.output_vocab_size == 0 && myParam.words_file == "") {
+  if (myParam.output_vocab_size == 0 && myParam.output_words_file == "") {
     myParam.output_vocab_size = training_data.row(myParam.ngram_size - 1).maxCoeff() + 1;
   }
 
