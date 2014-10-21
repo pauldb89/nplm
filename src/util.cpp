@@ -107,14 +107,14 @@ void readSentFile(const string &file, vector<vector<string> > &sentences)
 
 // Read a data file of unknown size into a flat vector<int>.
 // If this takes too much memory, we should create a vector of minibatches.
-void readDataFile(const string &filename, int &ngram_size, vector<int> &data, int minibatch_size)
-{
+void readDataFile(
+    const string &filename, int &ngram_size,
+    vector<int> &data, int minibatch_size) {
   cerr << "Reading minibatches from file " << filename << ": ";
 
   ifstream DATAIN(filename.c_str());
-  if (!DATAIN)
-  {
-    cerr << "Error: can't read data from file " << filename<< endl;
+  if (!DATAIN) {
+    cerr << "Error: can't read data from file " << filename << endl;
     exit(-1);
   }
 
@@ -122,26 +122,29 @@ void readDataFile(const string &filename, int &ngram_size, vector<int> &data, in
 
   string line;
   long long int n_lines = 0;
-  while (getline(DATAIN, line))
-  {
+  while (getline(DATAIN, line)) {
     vector<string> ngram;
     splitBySpace(line, ngram);
 
-    if (ngram_size == 0)
-        ngram_size = ngram.size();
-
-    if (ngram.size() != ngram_size)
-    {
-        cerr << "Error: expected " << ngram_size << " fields in instance, found " << ngram.size() << endl;
-  exit(-1);
+    if (ngram_size == 0) {
+      ngram_size = ngram.size();
     }
 
-    for (int i=0;i<ngram_size;i++)
-        data.push_back(boost::lexical_cast<int>(ngram[i]));
+    if (ngram.size() != ngram_size) {
+      cerr << "Error: expected " << ngram_size
+           << " fields in instance, found " << ngram.size() << endl;
+      exit(-1);
+    }
+
+    for (int i = 0;i < ngram_size; i++) {
+      data.push_back(boost::lexical_cast<int>(ngram[i]));
+    }
 
     n_lines++;
-    if (minibatch_size && n_lines % (minibatch_size * 10000) == 0)
-      cerr << n_lines/minibatch_size << "...";
+    cerr << n_lines << "\n";
+    if (minibatch_size && n_lines % (minibatch_size * 10000) == 0) {
+      // cerr << n_lines / minibatch_size << "...";
+    }
   }
   cerr << "done." << endl;
   DATAIN.close();
