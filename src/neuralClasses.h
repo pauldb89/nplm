@@ -154,7 +154,7 @@ class Output_word_embeddings {
   //Matrix<double,Dynamic,Dynamic,Eigen::RowMajor> W;
   // Having W be a pointer to a matrix allows ease of sharing
   // input and output word embeddings
-  Matrix<double,Dynamic,Dynamic,Eigen::RowMajor> *W;
+  Matrix<double,Dynamic,Dynamic,Eigen::RowMajor> W;
   Matrix<double,Dynamic,1> b;
   Matrix<double,Dynamic,Dynamic> W_running_gradient;
   Matrix<double,Dynamic,Dynamic> W_gradient;
@@ -169,20 +169,16 @@ class Output_word_embeddings {
   }
 
   void resize(int rows, int cols) {
-    W->setZero(rows, cols);
+    W.setZero(rows, cols);
     b.setZero(rows);
   }
 
-  void set_W(Matrix<double,Dynamic,Dynamic,Eigen::RowMajor> *input_W) {
-    W = input_W;
-  }
-
   void read_weights(std::ifstream &W_file) {
-    readMatrix(W_file, *W);
+    readMatrix(W_file, W);
   }
 
   void write_weights(std::ofstream &W_file) const {
-    writeMatrix(*W, W_file);
+    writeMatrix(W, W_file);
   }
 
   void read_biases(std::ifstream &b_file) {
@@ -195,16 +191,16 @@ class Output_word_embeddings {
 
   template <typename Engine>
   void initialize(Engine &engine, bool init_normal, double init_range, double init_bias) {
-    initMatrix(engine, *W, init_normal, init_range);
+    initMatrix(engine, W, init_normal, init_range);
     b.fill(init_bias);
   }
 
   int n_inputs() const {
-    return W->cols();
+    return W.cols();
   }
 
   int n_outputs() const {
-    return W->rows();
+    return W.rows();
   }
 
   template<typename DerivedIn, typename DerivedOut>
@@ -212,7 +208,7 @@ class Output_word_embeddings {
       const MatrixBase<DerivedIn> &input,
       const MatrixBase<DerivedOut> &output) const {
     UNCONST(DerivedOut, output, my_output);
-    my_output = ((*W) * input).colwise() + b;
+    my_output = ((W) * input).colwise() + b;
   }
 
   // Sparse output version
@@ -229,8 +225,8 @@ class Output_word_embeddings {
       }
     }
 
-    USCMatrix<double> sparse_output(W->rows(), samples, my_output);
-    uscgemm_masked(1.0, *W, input, sparse_output);
+    USCMatrix<double> sparse_output(W.rows(), samples, my_output);
+    uscgemm_masked(1.0, W, input, sparse_output);
     my_output = sparse_output.values; // too bad, so much copying
   }
 
@@ -240,7 +236,7 @@ class Output_word_embeddings {
       const MatrixBase<DerivedIn> &input,
       int word,
       int instance) const {
-    return W->row(word).dot(input.col(instance)) + b(word);
+    return W.row(word).dot(input.col(instance)) + b(word);
   }
 
   // Dense versions (for log-likelihood loss)
@@ -253,7 +249,7 @@ class Output_word_embeddings {
     // bProp_matrix is output_embedding_dimension x minibatch_size
     UNCONST(DerivedGIn, bProp_matrix, my_bProp_matrix);
     my_bProp_matrix.leftCols(input_bProp_matrix.cols()).noalias() =
-        W->transpose() * input_bProp_matrix;
+        W.transpose() * input_bProp_matrix;
   }
 
   template <typename DerivedIn, typename DerivedGOut>
@@ -268,7 +264,7 @@ class Output_word_embeddings {
     // predicted_embeddings is output_embedding_dimension x minibatch_size
     // bProp_input is vocab_size x minibatch_size
 
-    W->noalias() += learning_rate * bProp_input * predicted_embeddings.transpose();
+    W.noalias() += learning_rate * bProp_input * predicted_embeddings.transpose();
     b += learning_rate * bProp_input.rowwise().sum();
   }
 
@@ -281,7 +277,7 @@ class Output_word_embeddings {
     UNCONST(DerivedGIn, bProp_matrix, my_bProp_matrix);
     my_bProp_matrix.setZero();
     uscgemm(
-        1.0, W->transpose(), USCMatrix<double>(W->rows(), samples, weights),
+        1.0, W.transpose(), USCMatrix<double>(W.rows(), samples, weights),
         my_bProp_matrix.leftCols(samples.cols())); // narrow bProp_matrix for possible short minibatch
   }
 
@@ -291,10 +287,10 @@ class Output_word_embeddings {
       const MatrixBase<DerivedGOutI> &samples,
       const MatrixBase<DerivedGOutV> &weights,
       double learning_rate, double momentum) { //not sure if we want to use momentum here
-    USCMatrix<double> gradient_output(W->rows(), samples, weights);
+    USCMatrix<double> gradient_output(W.rows(), samples, weights);
     uscgemm(
         learning_rate, gradient_output,
-        predicted_embeddings.leftCols(gradient_output.cols()).transpose(), *W); // narrow predicted_embeddings for possible short minibatch
+        predicted_embeddings.leftCols(gradient_output.cols()).transpose(), W); // narrow predicted_embeddings for possible short minibatch
     uscgemv(
         learning_rate, gradient_output,
         Matrix<double,Dynamic,1>::Ones(gradient_output.cols()), b);
@@ -306,17 +302,17 @@ class Output_word_embeddings {
       const MatrixBase<DerivedGOutI> &samples,
       const MatrixBase<DerivedGOutV> &weights,
       double learning_rate, double momentum) { //not sure if we want to use momentum here
-    W_gradient.setZero(W->rows(), W->cols());
+    W_gradient.setZero(W.rows(), W.cols());
     b_gradient.setZero(b.size());
-    if (W_running_gradient.rows() != W->rows() || W_running_gradient.cols() != W->cols()) {
-      W_running_gradient.setZero(W->rows(), W->cols());
+    if (W_running_gradient.rows() != W.rows() || W_running_gradient.cols() != W.cols()) {
+      W_running_gradient.setZero(W.rows(), W.cols());
     }
 
     if (b_running_gradient.size() != b.size()) {
       b_running_gradient.setZero(b.size());
     }
 
-    USCMatrix<double> gradient_output(W->rows(), samples, weights);
+    USCMatrix<double> gradient_output(W.rows(), samples, weights);
     uscgemm(
         learning_rate, gradient_output,
         predicted_embeddings.leftCols(samples.cols()).transpose(), W_gradient);
@@ -343,7 +339,7 @@ class Output_word_embeddings {
       int update_item = update_items[item_id];
       W_running_gradient.row(update_item).array() += W_gradient.row(update_item).array().square();
       b_running_gradient(update_item) += b_gradient(update_item) * b_gradient(update_item);
-      W->row(update_item).array() += learning_rate * W_gradient.row(update_item).array() / W_running_gradient.row(update_item).array().sqrt();
+      W.row(update_item).array() += learning_rate * W_gradient.row(update_item).array() / W_running_gradient.row(update_item).array().sqrt();
       b(update_item) += learning_rate * b_gradient(update_item) / sqrt(b_running_gradient(update_item));
     }
   }
@@ -359,7 +355,7 @@ class Output_word_embeddings {
     UNCONST(DerivedGb, gradient_b, my_gradient_b);
     my_gradient_W.setZero();
     my_gradient_b.setZero();
-    USCMatrix<double> gradient_output(W->rows(), samples, weights);
+    USCMatrix<double> gradient_output(W.rows(), samples, weights);
     uscgemm(
         1.0, gradient_output,
         predicted_embeddings.leftCols(samples.cols()).transpose(), my_gradient_W);
@@ -371,7 +367,7 @@ class Output_word_embeddings {
 
 class Input_word_embeddings {
  private:
-  Matrix<double,Dynamic,Dynamic,Eigen::RowMajor> *W;
+  Matrix<double,Dynamic,Dynamic,Eigen::RowMajor> W;
   int context_size, vocab_size;
   Matrix<double,Dynamic,Dynamic> W_running_gradient;
   Matrix<double,Dynamic,Dynamic> W_gradient;
@@ -384,27 +380,23 @@ class Input_word_embeddings {
     resize(rows, cols, context);
   }
 
-  void set_W(Matrix<double,Dynamic,Dynamic,Eigen::RowMajor> *input_W) {
-    W = input_W;
-  }
-
   void resize(int rows, int cols, int context) {
     context_size = context;
     vocab_size = rows;
-    W->setZero(rows, cols);
+    W.setZero(rows, cols);
   }
 
   void read(std::ifstream &W_file) {
-    readMatrix(W_file, *W);
+    readMatrix(W_file, W);
   }
 
   void write(std::ofstream &W_file) const {
-    writeMatrix(*W, W_file);
+    writeMatrix(W, W_file);
   }
 
   template <typename Engine>
   void initialize(Engine &engine, bool init_normal, double init_range) {
-    initMatrix(engine, *W, init_normal, init_range);
+    initMatrix(engine, W, init_normal, init_range);
   }
 
   int n_inputs() const {
@@ -412,16 +404,16 @@ class Input_word_embeddings {
   }
 
   int n_outputs() const {
-    return W->cols() * context_size;
+    return W.cols() * context_size;
   }
 
   // set output_id's embedding to the weighted average of all embeddings
   template <typename Dist>
   void average(const Dist &dist, int output_id) {
-    W->row(output_id).setZero();
-    for (int i=0; i < W->rows(); i++) {
+    W.row(output_id).setZero();
+    for (int i=0; i < W.rows(); i++) {
       if (i != output_id) {
-        W->row(output_id) += dist.prob(i) * W->row(i);
+        W.row(output_id) += dist.prob(i) * W.row(i);
       }
     }
   }
@@ -430,7 +422,7 @@ class Input_word_embeddings {
   void fProp(
       const MatrixBase<DerivedIn> &input,
       const MatrixBase<DerivedOut> &output) const {
-    int embedding_dimension = W->cols();
+    int embedding_dimension = W.cols();
 
     // W      is vocab_size                        x embedding_dimension
     // input  is ngram_size*vocab_size             x minibatch_size
@@ -448,8 +440,8 @@ class Input_word_embeddings {
       // input might be narrower than expected due to a short minibatch,
       // so narrow output to match
       uscgemm(
-          1.0, W->transpose(),
-          USCMatrix<double>(W->rows(),input.middleRows(ngram, 1),Matrix<double,1,Dynamic>::Ones(input.cols())),
+          1.0, W.transpose(),
+          USCMatrix<double>(W.rows(),input.middleRows(ngram, 1),Matrix<double,1,Dynamic>::Ones(input.cols())),
           my_output.block(ngram*embedding_dimension, 0, embedding_dimension, input.cols()));
     }
   }
@@ -471,7 +463,7 @@ class Input_word_embeddings {
       const MatrixBase<DerivedGOut> &bProp_input,
       const MatrixBase<DerivedIn> &input_words,
       double learning_rate, double momentum, double L2_reg) {
-    int embedding_dimension = W->cols();
+    int embedding_dimension = W.cols();
 
     // W           is vocab_size                     x embedding_dimension
     // input       is ngram_size                     x minibatch_size
@@ -485,9 +477,9 @@ class Input_word_embeddings {
     for (int ngram = 0; ngram < context_size; ngram++) {
       uscgemm(
           learning_rate,
-          USCMatrix<double>(W->rows(), input_words.middleRows(ngram, 1), Matrix<double,1,Dynamic>::Ones(input_words.cols())),
+          USCMatrix<double>(W.rows(), input_words.middleRows(ngram, 1), Matrix<double,1,Dynamic>::Ones(input_words.cols())),
           bProp_input.block(ngram*embedding_dimension,0,embedding_dimension,input_words.cols()).transpose(),
-          *W);
+          W);
     }
   }
 
@@ -496,16 +488,16 @@ class Input_word_embeddings {
             const MatrixBase<DerivedIn> &input_words,
             double learning_rate, double momentum, double L2_reg)
     {
-            int embedding_dimension = W->cols();
+            int embedding_dimension = W.cols();
 
-      W_gradient.setZero(W->rows(), W->cols());
-      if (W_running_gradient.rows() != W->rows() || W_running_gradient.cols() != W->cols())
-          W_running_gradient.setZero(W->rows(), W->cols());
+      W_gradient.setZero(W.rows(), W.cols());
+      if (W_running_gradient.rows() != W.rows() || W_running_gradient.cols() != W.cols())
+          W_running_gradient.setZero(W.rows(), W.cols());
 
       for (int ngram=0; ngram<context_size; ngram++)
       {
           uscgemm(learning_rate,
-      USCMatrix<double>(W->rows(),input_words.middleRows(ngram, 1),Matrix<double,1,Dynamic>::Ones(input_words.cols())),
+      USCMatrix<double>(W.rows(),input_words.middleRows(ngram, 1),Matrix<double,1,Dynamic>::Ones(input_words.cols())),
       bProp_input.block(ngram*embedding_dimension, 0, embedding_dimension, input_words.cols()).transpose(),
       W_gradient);
       }
@@ -530,7 +522,7 @@ class Input_word_embeddings {
             {
           int update_item = update_items[item_id];
                 W_running_gradient.row(update_item).array() += W_gradient.row(update_item).array().square();
-                W->row(update_item).array() += learning_rate * W_gradient.row(update_item).array() / W_running_gradient.row(update_item).array().sqrt();
+                W.row(update_item).array() += learning_rate * W_gradient.row(update_item).array() / W_running_gradient.row(update_item).array().sqrt();
             }
         }
 
@@ -541,11 +533,11 @@ class Input_word_embeddings {
           const MatrixBase<DerivedGW> &gradient) const //not sure if we want to use momentum here
         {
       UNCONST(DerivedGW, gradient, my_gradient);
-            int embedding_dimension = W->cols();
+            int embedding_dimension = W.cols();
       my_gradient.setZero();
       for (int ngram=0; ngram<context_size; ngram++)
       uscgemm(1.0,
-        USCMatrix<double>(W->rows(),input_words.middleRows(ngram, 1),Matrix<double,1,Dynamic>::Ones(input_words.cols())),
+        USCMatrix<double>(W.rows(),input_words.middleRows(ngram, 1),Matrix<double,1,Dynamic>::Ones(input_words.cols())),
         bProp_input.block(ngram*embedding_dimension, 0, embedding_dimension, input_words.cols()).transpose(),
         my_gradient);
         }

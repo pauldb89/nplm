@@ -96,12 +96,13 @@ void EvaluateModel(
       current_validation_ll = log_likelihood;
 
       if (model_output_file != "") {
-        cerr << "Writing model" << endl;
+        cerr << "Writing model to " << model_output_file << endl;
         if (input_words_file != "") {
           nn.write(model_output_file, input_words, output_words);
         } else {
           nn.write(model_output_file);
         }
+        cerr << "Done writing model" << endl;
       }
     }
   }
@@ -144,7 +145,6 @@ int main(int argc, char** argv) {
     ValueArg<string> activation_function("", "activation_function", "Activation function (identity, rectifier, tanh, hardtanh, sigmoid). Default: rectifier.", false, "rectifier", "string", cmd);
     ValueArg<int> num_hidden("", "num_hidden", "Number of hidden nodes. Default: 100.", false, 100, "int", cmd);
 
-    ValueArg<bool> share_embeddings("", "share_embeddings", "Share input and output embeddings. 1 = yes, 0 = no. Default: 0.", false, 0, "bool", cmd);
     ValueArg<int> output_embedding_dimension("", "output_embedding_dimension", "Number of output embedding dimensions. Default: 50.", false, 50, "int", cmd);
     ValueArg<int> input_embedding_dimension("", "input_embedding_dimension", "Number of input embedding dimensions. Default: 50.", false, 50, "int", cmd);
     ValueArg<int> embedding_dimension("", "embedding_dimension", "Number of input and output embedding dimensions. Default: none.", false, -1, "int", cmd);
@@ -203,7 +203,6 @@ int main(int argc, char** argv) {
     myParam.num_epochs= num_epochs.getValue();
     myParam.learning_rate = learning_rate.getValue();
     myParam.use_momentum = use_momentum.getValue();
-    myParam.share_embeddings = share_embeddings.getValue();
     myParam.normalization = normalization.getValue();
     myParam.initial_momentum = initial_momentum.getValue();
     myParam.final_momentum = final_momentum.getValue();
@@ -234,12 +233,6 @@ int main(int argc, char** argv) {
       cerr << input_embedding_dimension.getDescription() << sep << input_embedding_dimension.getValue() << endl;
       cerr << output_embedding_dimension.getDescription() << sep << output_embedding_dimension.getValue() << endl;
     }
-    cerr << share_embeddings.getDescription() << sep << share_embeddings.getValue() << endl;
-    if (share_embeddings.getValue() && input_embedding_dimension.getValue() != output_embedding_dimension.getValue()) {
-      cerr << "error: sharing input and output embeddings requires that input and output embeddings have same dimension" << endl;
-      exit(1);
-    }
-
     cerr << num_hidden.getDescription() << sep << num_hidden.getValue() << endl;
 
     if (string_to_activation_function(activation_function.getValue()) == InvalidFunction) {
@@ -333,7 +326,6 @@ int main(int argc, char** argv) {
   Map< Matrix<int,Dynamic,Dynamic> > validation_data(validation_data_flat.data(), myParam.ngram_size, validation_data_size);
 
   ///// Read in vocabulary file. We don't actually use it; it just gets reproduced in the output file
-
   vector<string> input_words;
   if (myParam.input_words_file != "") {
     readWordsFile(myParam.input_words_file, input_words);
@@ -362,10 +354,10 @@ int main(int argc, char** argv) {
 
   model nn;
   if (myParam.model_input_file == "") {
-    nn = model(
+   nn = model(
         myParam.ngram_size, myParam.input_vocab_size, myParam.output_vocab_size,
         myParam.input_embedding_dimension, myParam.num_hidden,
-        myParam.output_embedding_dimension, myParam.share_embeddings);
+        myParam.output_embedding_dimension);
     nn.initialize(rng, myParam.init_normal, myParam.init_range, -log(myParam.output_vocab_size));
     nn.set_activation_function(string_to_activation_function(myParam.activation_function));
   } else {
@@ -585,7 +577,7 @@ int main(int argc, char** argv) {
         validation_data, validation_data_size,
         validation_minibatch_size, num_validation_batches,
         output_vocab_size, ngram_size, epoch,
-        myParam.input_words_file, myParam.model_output_file,
+        myParam.model_output_file, myParam.input_words_file,
         current_learning_rate, current_validation_ll);
   }
 

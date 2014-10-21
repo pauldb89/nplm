@@ -33,18 +33,7 @@ class model {
         int output_vocab_size,
         int input_embedding_dimension,
         int num_hidden,
-        int output_embedding_dimension,
-        bool share_embeddings) {
-    if (share_embeddings) {
-      input_and_output_embedding_matrix = Matrix<double,Dynamic,Dynamic,Eigen::RowMajor>();
-      input_layer.set_W(&input_and_output_embedding_matrix);
-      output_layer.set_W(&input_and_output_embedding_matrix);
-    } else {
-      input_embedding_matrix = Matrix<double,Dynamic,Dynamic,Eigen::RowMajor>();
-      output_embedding_matrix = Matrix<double,Dynamic,Dynamic,Eigen::RowMajor>();
-      input_layer.set_W(&input_embedding_matrix);
-      output_layer.set_W(&output_embedding_matrix);
-    }
+        int output_embedding_dimension) {
     resize(
         ngram_size, input_vocab_size, output_vocab_size,
         input_embedding_dimension, num_hidden, output_embedding_dimension);
@@ -55,10 +44,7 @@ class model {
         premultiplied(false),
         activation_function(Rectifier),
         output_embedding_matrix(Matrix<double,Dynamic,Dynamic,Eigen::RowMajor>()),
-        input_embedding_matrix(Matrix<double,Dynamic,Dynamic,Eigen::RowMajor>()) {
-    output_layer.set_W(&output_embedding_matrix);
-    input_layer.set_W(&input_embedding_matrix);
-  }
+        input_embedding_matrix(Matrix<double,Dynamic,Dynamic,Eigen::RowMajor>()) {}
 
   void resize(
       int ngram_size,

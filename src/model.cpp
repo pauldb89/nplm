@@ -51,68 +51,60 @@ void model::premultiply() {
   first_hidden_linear.U.resize(num_hidden, input_vocab_size * context_size);
   for (int i = 0; i < context_size; i++) {
       first_hidden_linear.U.middleCols(i * input_vocab_size, input_vocab_size) =
-          U.middleCols(i * input_embedding_dimension, input_embedding_dimension) * input_layer.W->transpose();
+          U.middleCols(i * input_embedding_dimension, input_embedding_dimension) * input_layer.W.transpose();
   }
-  input_layer.W->resize(1, 1); // try to save some memory
+  input_layer.W.resize(1, 1); // try to save some memory
   premultiplied = true;
 }
 
-void model::readConfig(ifstream &config_file)
-{
-    string line;
-    vector<string> fields;
-    int ngram_size, vocab_size, input_embedding_dimension, num_hidden, output_embedding_dimension;
-    activation_function_type activation_function = this->activation_function;
-    while (getline(config_file, line) && line != "")
-    {
-        splitBySpace(line, fields);
-	if (fields[0] == "ngram_size")
+void model::readConfig(ifstream &config_file) {
+  string line;
+  vector<string> fields;
+  int ngram_size, vocab_size, input_embedding_dimension, num_hidden, output_embedding_dimension;
+  activation_function_type activation_function = this->activation_function;
+  while (getline(config_file, line) && line != "") {
+    splitBySpace(line, fields);
+	  if (fields[0] == "ngram_size") {
 	    ngram_size = lexical_cast<int>(fields[1]);
-	else if (fields[0] == "vocab_size")
-	    input_vocab_size = output_vocab_size = lexical_cast<int>(fields[1]);
-	else if (fields[0] == "input_vocab_size")
-	    input_vocab_size = lexical_cast<int>(fields[1]);
-	else if (fields[0] == "output_vocab_size")
+    } else if (fields[0] == "vocab_size") {
+      input_vocab_size = output_vocab_size = lexical_cast<int>(fields[1]);
+    } else if (fields[0] == "input_vocab_size") {
+      input_vocab_size = lexical_cast<int>(fields[1]);
+    } else if (fields[0] == "output_vocab_size") {
 	    output_vocab_size = lexical_cast<int>(fields[1]);
-	else if (fields[0] == "input_embedding_dimension")
+    } else if (fields[0] == "input_embedding_dimension") {
 	    input_embedding_dimension = lexical_cast<int>(fields[1]);
-	else if (fields[0] == "num_hidden")
+    } else if (fields[0] == "num_hidden") {
 	    num_hidden = lexical_cast<int>(fields[1]);
-	else if (fields[0] == "output_embedding_dimension")
+    } else if (fields[0] == "output_embedding_dimension") {
 	    output_embedding_dimension = lexical_cast<int>(fields[1]);
-	else if (fields[0] == "activation_function")
+    }	else if (fields[0] == "activation_function") {
 	    activation_function = string_to_activation_function(fields[1]);
-	else if (fields[0] == "version")
-	{
+	  } else if (fields[0] == "version") {
 	    int version = lexical_cast<int>(fields[1]);
-	    if (version != 1)
-	    {
-		cerr << "error: file format mismatch (expected 1, found " << version << ")" << endl;
-		exit(1);
+	    if (version != 1) {
+    		cerr << "error: file format mismatch (expected 1, found " << version << ")" << endl;
+		    exit(1);
 	    }
-	}
-	else
+	  } else {
 	    cerr << "warning: unrecognized field in config: " << fields[0] << endl;
     }
-    resize(ngram_size,
-        input_vocab_size,
-        output_vocab_size,
-        input_embedding_dimension,
-        num_hidden,
-        output_embedding_dimension);
-    set_activation_function(activation_function);
+  }
+
+  resize(
+      ngram_size, input_vocab_size, output_vocab_size,
+      input_embedding_dimension, num_hidden, output_embedding_dimension);
+  set_activation_function(activation_function);
 }
 
-void model::readConfig(const string &filename)
-{
-    ifstream config_file(filename.c_str());
-    if (!config_file)
-    {
-        cerr << "error: could not open config file " << filename << endl;
-	exit(1);
-    }
-    readConfig(config_file);
-    config_file.close();
+void model::readConfig(const string &filename) {
+  ifstream config_file(filename.c_str());
+  if (!config_file) {
+    cerr << "error: could not open config file " << filename << endl;
+	  exit(1);
+  }
+  readConfig(config_file);
+  config_file.close();
 }
 
 void model::read(const string &filename) {
