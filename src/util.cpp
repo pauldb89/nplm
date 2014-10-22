@@ -17,7 +17,6 @@ extern double drand48();
 
 using namespace Eigen;
 using namespace std;
-using namespace boost::random;
 
 namespace nplm
 {

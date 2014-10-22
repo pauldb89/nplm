@@ -2,13 +2,11 @@
 
 #include <iostream>
 #include <fstream>
+#include <random>
 #include <sstream>
 #include <vector>
 #include <string>
 
-#include <boost/random/mersenne_twister.hpp>
-#include <boost/random/uniform_real_distribution.hpp>
-#include <boost/random/normal_distribution.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/functional/hash.hpp>
 #ifdef USE_CHRONO
@@ -19,19 +17,45 @@
 
 #include "maybe_omp.h"
 
-// Make matrices hashable
+using namespace std;
+using namespace Eigen;
 
-namespace Eigen {
-    template <typename Derived>
-    size_t hash_value(const DenseBase<Derived> &m)
-    {
-        size_t h=0;
-	for (int i=0; i<m.rows(); i++)
-	    for (int j=0; j<m.cols(); j++)
-	        boost::hash_combine(h, m(i,j));
-	return h;
+typedef long long int data_size_t; // training data can easily exceed 2G instances
+typedef vector<int> Corpus;
+typedef Matrix<int, Dynamic, Dynamic> MatrixInt;
+typedef Matrix<int, Dynamic, 1> VectorInt;
+
+namespace std {
+
+template<>
+class hash<MatrixInt> {
+ public:
+  inline size_t operator()(const MatrixInt &m) const {
+    size_t hash = 0;
+    for (int i = 0; i < m.rows(); i++) {
+      for (int j = 0; j < m.cols(); ++j) {
+        boost::hash_combine(hash, m(i, j));
+      }
     }
-}
+
+    return hash;
+  }
+};
+
+template<>
+class hash<VectorInt> {
+ public:
+  inline size_t operator()(const VectorInt &v) const {
+    size_t hash = 0;
+    for (int i = 0; i < v.rows(); i++) {
+      boost::hash_combine(hash, v(i));
+    }
+
+    return hash;
+  }
+};
+
+} // namespace std
 
 namespace nplm
 {
@@ -52,13 +76,13 @@ void readSentFile(const std::string &file, std::vector<std::vector<std::string> 
 
 template <typename Derived>
 void initMatrix(
-    boost::random::mt19937 &engine,
+    mt19937 &engine,
 		const Eigen::MatrixBase<Derived> &p_const,
 		bool init_normal, double range) {
   UNCONST(Derived, p_const, p);
   // initialize with uniform distribution in [-range, range]
   if (init_normal == 0) {
-    boost::random::uniform_real_distribution<> unif_real(-range, range);
+    uniform_real_distribution<> unif_real(-range, range);
     for (int i = 0; i < p.rows(); i++) {
       for (int j = 0; j< p.cols(); j++) {
         p(i,j) = unif_real(engine);
@@ -66,7 +90,7 @@ void initMatrix(
     }
   } else {
     // initialize with gaussian distribution with mean 0 and stdev range
-    boost::random::normal_distribution<double> unif_normal(0., range);
+    normal_distribution<double> unif_normal(0., range);
     for (int i = 0; i < p.rows(); i++) {
       for (int j = 0; j < p.cols(); j++) {
         p(i,j) = unif_normal(engine);

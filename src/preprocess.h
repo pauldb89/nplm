@@ -45,7 +45,7 @@ void makeNgrams(
 inline void preprocessWords(
     const std::vector<std::string> &words,
     std::vector<std::vector<int> > &ngrams,
-    int ngram_size, const vocabulary &vocab,
+    int ngram_size, const Vocabulary &vocab,
     bool numberize, bool add_start_stop, bool ngramize) {
   int start = vocab.lookup_word("<s>");
   int stop = vocab.lookup_word("</s>");
@@ -84,7 +84,7 @@ inline void preprocessWords(
 
 void writeNgrams(
     const vector<vector<string> >& data, int ngram_size,
-    const vocabulary &vocab, bool numberize, bool add_start_stop,
+    const Vocabulary &vocab, bool numberize, bool add_start_stop,
     bool ngramize, const string &filename) {
   ofstream file(filename.c_str());
   if (!file) {

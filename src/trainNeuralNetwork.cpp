@@ -1,72 +1,82 @@
+#include <algorithm>
 #include <ctime>
 #include <cmath>
-
-#include <iostream>
 #include <fstream>
+#include <iostream>
+#include <memory>
+#include <unordered_map>
 #include <vector>
-#include <algorithm>
 
-#include <boost/unordered_map.hpp>
+#include <boost/algorithm/string/join.hpp>
 #include <boost/functional.hpp>
 #include <boost/lexical_cast.hpp>
-#include <boost/random/mersenne_twister.hpp>
-#include <boost/algorithm/string/join.hpp>
 
 #include "../3rdparty/Eigen/Dense"
 #include "../3rdparty/Eigen/Sparse"
 #include "maybe_omp.h"
 #include <tclap/CmdLine.h>
 
-#include "model.h"
-#include "propagator.h"
-#include "param.h"
-#include "neuralClasses.h"
+#include "context_extractor.h"
 #include "graphClasses.h"
-#include "util.h"
+#include "model.h"
 #include "multinomial.h"
-//#include "gradientCheck.h"
+#include "neuralClasses.h"
+#include "propagator.h"
+#include "config.h"
+#include "util.h"
+#include "vocabulary.h"
 
 //#define EIGEN_DONT_PARALLELIZE
 
 using namespace std;
 using namespace TCLAP;
 using namespace Eigen;
-using namespace boost;
-using namespace boost::random;
 
 using namespace nplm;
 
-typedef unordered_map<Matrix<int,Dynamic,1>, double> vector_map;
+typedef unordered_map<VectorInt, double> VectorMap;
 
-typedef long long int data_size_t; // training data can easily exceed 2G instances
+MatrixInt ExtractMinibatch(
+    const shared_ptr<Corpus>& corpus,
+    const shared_ptr<Vocabulary>& vocab,
+    const Config& config,
+    data_size_t start_index) {
+  data_size_t actual_size = min(
+      static_cast<data_size_t>(corpus->size()) - start_index,
+      static_cast<data_size_t>(config.minibatch_size));
+  ContextExtractor extractor(
+      corpus, config.ngram_size, vocab->lookup_word("<s>"),
+      vocab->lookup_word("</s>"));
+  MatrixInt minibatch = MatrixInt::Zero(config.ngram_size, actual_size);
+  for (data_size_t i = 0; i < actual_size; ++i) {
+    minibatch.col(i) = extractor.extract(start_index + i);
+  }
 
+  return minibatch;
+}
 
 void EvaluateModel(
-    const model& nn, propagator& prop_validation,
-    const vector<string>& input_words, const vector<string>& output_words,
-    const Map<Matrix<int,Dynamic,Dynamic> >& validation_data,
-    int validation_data_size, int validation_minibatch_size,
-    int num_validation_batches, int output_vocab_size, int ngram_size,
-    int epoch, const string& model_output_file, const string& input_words_file,
-    double& current_learning_rate, double& current_validation_ll) {
-  if (validation_data_size > 0) {
+    const Config& config, const model& nn, propagator& prop_validation,
+    const shared_ptr<Corpus>& test_corpus, const shared_ptr<Vocabulary>& vocab,
+    int epoch, double& current_learning_rate, double& current_validation_ll) {
+  if (test_corpus->size() > 0) {
     double log_likelihood = 0.0;
-    Matrix<double,Dynamic,Dynamic> scores(output_vocab_size, validation_minibatch_size);
-    Matrix<double,Dynamic,Dynamic> output_probs(output_vocab_size, validation_minibatch_size);
-    Matrix<int,Dynamic,Dynamic> minibatch(ngram_size, validation_minibatch_size);
+    Matrix<double,Dynamic,Dynamic> scores(vocab->size(), config.minibatch_size);
+    Matrix<double,Dynamic,Dynamic> output_probs(vocab->size(), config.minibatch_size);
 
     cerr << endl;
     cerr << "Validation minibatches: " << endl;
-    for (int validation_batch = 0; validation_batch < num_validation_batches; validation_batch++) {
-      if (validation_batch % 50 == 0) {
-        cerr << validation_batch << "... ";
+    int num_batches = (test_corpus->size() - 1) / config.minibatch_size + 1;
+    for (int batch = 0; batch < num_batches; batch++) {
+      if (batch % 50 == 0) {
+        cerr << batch << "... ";
       }
-      int validation_minibatch_start_index = validation_minibatch_size * validation_batch;
-      int current_minibatch_size =
-          min(validation_minibatch_size, validation_data_size - validation_minibatch_start_index);
-      minibatch.leftCols(current_minibatch_size) = validation_data.middleCols(
-          validation_minibatch_start_index, current_minibatch_size);
-      prop_validation.fProp(minibatch.topRows(ngram_size-1));
+
+      data_size_t start_index = config.minibatch_size * batch;
+      MatrixInt minibatch =
+          ExtractMinibatch(test_corpus, vocab, config, start_index);
+
+      prop_validation.fProp(minibatch.topRows(config.ngram_size - 1));
 
       // Do full forward prop through output word embedding layer
       start_timer(4);
@@ -77,8 +87,8 @@ void EvaluateModel(
       double minibatch_log_likelihood;
       start_timer(5);
       SoftmaxLogLoss().fProp(
-          scores.leftCols(current_minibatch_size),
-          minibatch.row(ngram_size-1),
+          scores.leftCols(minibatch.cols()),
+          minibatch.row(config.ngram_size - 1),
           output_probs,
           minibatch_log_likelihood);
       stop_timer(5);
@@ -87,7 +97,7 @@ void EvaluateModel(
 
     cerr << endl;
     cerr << "Validation log-likelihood: " << log_likelihood << endl;
-    cerr << "           perplexity:     " << exp(-log_likelihood/validation_data_size) << endl;
+    cerr << "           perplexity:     " << exp(-log_likelihood / test_corpus->size()) << endl;
 
     // If the validation perplexity decreases, halve the learning rate.
     if (epoch > 0 && log_likelihood < current_validation_ll) {
@@ -95,21 +105,40 @@ void EvaluateModel(
     } else {
       current_validation_ll = log_likelihood;
 
-      if (model_output_file != "") {
-        cerr << "Writing model to " << model_output_file << endl;
-        if (input_words_file != "") {
-          nn.write(model_output_file, input_words, output_words);
-        } else {
-          nn.write(model_output_file);
-        }
+      if (config.model_output_file != "") {
+        cerr << "Writing model to " << config.model_output_file << endl;
+        nn.write(config.model_output_file);
+        vocab->write(config.model_output_file);
         cerr << "Done writing model" << endl;
       }
     }
   }
 }
 
+shared_ptr<Corpus> readCorpus(
+    const string& filename,
+    const shared_ptr<Vocabulary>& vocab) {
+  shared_ptr<Corpus> corpus = make_shared<Corpus>();
+
+  int eos_id = vocab->lookup_word("</s>");
+
+  string line;
+  ifstream fin(filename);
+  while (getline(fin, line)) {
+    string word;
+    stringstream stream(line);
+    while (stream >> word) {
+      corpus->push_back(vocab->insert_word(word));
+    }
+
+    corpus->push_back(eos_id);
+  }
+
+  return corpus;
+}
+
 int main(int argc, char** argv) {
-  param myParam;
+  Config config;
   try {
     // program options //
     CmdLine cmd("Trains a two-layer neural probabilistic language model.", ' ' , "0.1");
@@ -133,7 +162,6 @@ int main(int argc, char** argv) {
 
     ValueArg<double> learning_rate("", "learning_rate", "Learning rate for stochastic gradient ascent. Default: 0.01.", false, 0.01, "double", cmd);
 
-    ValueArg<int> validation_minibatch_size("", "validation_minibatch_size", "Minibatch size for validation. Default: 64.", false, 64, "int", cmd);
     ValueArg<int> minibatch_size("", "minibatch_size", "Minibatch size (for training). Default: 64.", false, 64, "int", cmd);
 
     ValueArg<int> num_epochs("", "num_epochs", "Number of epochs. Default: 10.", false, 10, "int", cmd);
@@ -149,67 +177,47 @@ int main(int argc, char** argv) {
     ValueArg<int> input_embedding_dimension("", "input_embedding_dimension", "Number of input embedding dimensions. Default: 50.", false, 50, "int", cmd);
     ValueArg<int> embedding_dimension("", "embedding_dimension", "Number of input and output embedding dimensions. Default: none.", false, -1, "int", cmd);
 
-    ValueArg<int> vocab_size("", "vocab_size", "Vocabulary size. Default: auto.", false, 0, "int", cmd);
-    ValueArg<int> input_vocab_size("", "input_vocab_size", "Vocabulary size. Default: auto.", false, 0, "int", cmd);
-    ValueArg<int> output_vocab_size("", "output_vocab_size", "Vocabulary size. Default: auto.", false, 0, "int", cmd);
     ValueArg<int> ngram_size("", "ngram_size", "Size of n-grams. Default: auto.", false, 0, "int", cmd);
 
-    ValueArg<string> model_input_file("", "model_input_file", "Model input file", false, "", "string", cmd);
     ValueArg<string> model_output_file("", "model_output_file", "Model output file" , false, "", "string", cmd);
-    ValueArg<string> words_file("", "words_file", "Vocabulary." , false, "", "string", cmd);
-    ValueArg<string> input_words_file("", "input_words_file", "Vocabulary." , false, "", "string", cmd);
-    ValueArg<string> output_words_file("", "output_words_file", "Vocabulary." , false, "", "string", cmd);
     ValueArg<string> validation_file("", "validation_file", "Validation data (one numberized example per line)." , false, "", "string", cmd);
     ValueArg<string> train_file("", "train_file", "Training data (one numberized example per line)." , true, "", "string", cmd);
 
     cmd.parse(argc, argv);
 
     // define program parameters //
-    myParam.train_file = train_file.getValue();
-    myParam.validation_file = validation_file.getValue();
-    myParam.input_words_file = input_words_file.getValue();
-    myParam.output_words_file = output_words_file.getValue();
-    if (words_file.getValue() != "") {
-      myParam.input_words_file = myParam.output_words_file = words_file.getValue();
-    }
+    config.train_file = train_file.getValue();
+    config.validation_file = validation_file.getValue();
 
-    myParam.model_input_file = model_input_file.getValue();
-    myParam.model_output_file = model_output_file.getValue();
+    config.model_output_file = model_output_file.getValue();
 
-    myParam.ngram_size = ngram_size.getValue();
-    myParam.vocab_size = vocab_size.getValue();
-    myParam.input_vocab_size = input_vocab_size.getValue();
-    myParam.output_vocab_size = output_vocab_size.getValue();
-    if (vocab_size.getValue() >= 0) {
-      myParam.input_vocab_size = myParam.output_vocab_size = vocab_size.getValue();
-    }
+    config.ngram_size = ngram_size.getValue();
 
-    myParam.num_hidden = num_hidden.getValue();
-    myParam.activation_function = activation_function.getValue();
-    myParam.loss_function = loss_function.getValue();
+    config.num_hidden = num_hidden.getValue();
+    config.activation_function = activation_function.getValue();
+    config.loss_function = loss_function.getValue();
 
-    myParam.num_threads = num_threads.getValue();
+    config.num_threads = num_threads.getValue();
 
-    myParam.num_noise_samples = num_noise_samples.getValue();
+    config.num_noise_samples = num_noise_samples.getValue();
 
-    myParam.input_embedding_dimension = input_embedding_dimension.getValue();
-    myParam.output_embedding_dimension = output_embedding_dimension.getValue();
+    config.input_embedding_dimension = input_embedding_dimension.getValue();
+    config.output_embedding_dimension = output_embedding_dimension.getValue();
     if (embedding_dimension.getValue() >= 0) {
-      myParam.input_embedding_dimension = myParam.output_embedding_dimension = embedding_dimension.getValue();
+      config.input_embedding_dimension = config.output_embedding_dimension = embedding_dimension.getValue();
     }
 
-    myParam.minibatch_size = minibatch_size.getValue();
-    myParam.validation_minibatch_size = validation_minibatch_size.getValue();
-    myParam.num_epochs= num_epochs.getValue();
-    myParam.learning_rate = learning_rate.getValue();
-    myParam.use_momentum = use_momentum.getValue();
-    myParam.normalization = normalization.getValue();
-    myParam.initial_momentum = initial_momentum.getValue();
-    myParam.final_momentum = final_momentum.getValue();
-    myParam.L2_reg = L2_reg.getValue();
-    myParam.init_normal= init_normal.getValue();
-    myParam.init_range = init_range.getValue();
-    myParam.normalization_init = normalization_init.getValue();
+    config.minibatch_size = minibatch_size.getValue();
+    config.num_epochs= num_epochs.getValue();
+    config.learning_rate = learning_rate.getValue();
+    config.use_momentum = use_momentum.getValue();
+    config.normalization = normalization.getValue();
+    config.initial_momentum = initial_momentum.getValue();
+    config.final_momentum = final_momentum.getValue();
+    config.L2_reg = L2_reg.getValue();
+    config.init_normal= init_normal.getValue();
+    config.init_range = init_range.getValue();
+    config.normalization_init = normalization_init.getValue();
 
     cerr << "Command line: " << endl;
     cerr << boost::algorithm::join(vector<string>(argv, argv+argc), " ") << endl;
@@ -217,15 +225,9 @@ int main(int argc, char** argv) {
     const string sep(" Value: ");
     cerr << train_file.getDescription() << sep << train_file.getValue() << endl;
     cerr << validation_file.getDescription() << sep << validation_file.getValue() << endl;
-    cerr << input_words_file.getDescription() << sep << input_words_file.getValue() << endl;
-    cerr << output_words_file.getDescription() << sep << output_words_file.getValue() << endl;
-    cerr << words_file.getDescription() << sep << words_file.getValue() << endl;
-    cerr << model_input_file.getDescription() << sep << model_input_file.getValue() << endl;
     cerr << model_output_file.getDescription() << sep << model_output_file.getValue() << endl;
 
     cerr << ngram_size.getDescription() << sep << ngram_size.getValue() << endl;
-    cerr << input_vocab_size.getDescription() << sep << input_vocab_size.getValue() << endl;
-    cerr << output_vocab_size.getDescription() << sep << output_vocab_size.getValue() << endl;
 
     if (embedding_dimension.getValue() >= 0) {
       cerr << embedding_dimension.getDescription() << sep << embedding_dimension.getValue() << endl;
@@ -252,21 +254,18 @@ int main(int argc, char** argv) {
 
     cerr << num_epochs.getDescription() << sep << num_epochs.getValue() << endl;
     cerr << minibatch_size.getDescription() << sep << minibatch_size.getValue() << endl;
-    if (myParam.validation_file != "") {
-      cerr << validation_minibatch_size.getDescription() << sep << validation_minibatch_size.getValue() << endl;
-    }
     cerr << learning_rate.getDescription() << sep << learning_rate.getValue() << endl;
     cerr << L2_reg.getDescription() << sep << L2_reg.getValue() << endl;
 
     cerr << num_noise_samples.getDescription() << sep << num_noise_samples.getValue() << endl;
 
     cerr << normalization.getDescription() << sep << normalization.getValue() << endl;
-    if (myParam.normalization) {
+    if (config.normalization) {
       cerr << normalization_init.getDescription() << sep << normalization_init.getValue() << endl;
     }
 
     cerr << use_momentum.getDescription() << sep << use_momentum.getValue() << endl;
-    if (myParam.use_momentum) {
+    if (config.use_momentum) {
       cerr << initial_momentum.getDescription() << sep << initial_momentum.getValue() << endl;
       cerr << final_momentum.getDescription() << sep << final_momentum.getValue() << endl;
     }
@@ -281,7 +280,7 @@ int main(int argc, char** argv) {
     exit(1);
   }
 
-  myParam.num_threads = setup_threads(myParam.num_threads);
+  config.num_threads = setup_threads(config.num_threads);
   int save_threads;
 
   //unsigned seed = std::time(0);
@@ -292,128 +291,85 @@ int main(int argc, char** argv) {
   /////////////////////////////////////////////////////////////////////////////////////
 
   // Read training data
-  vector<int> training_data_flat;
-  readDataFile(myParam.train_file, myParam.ngram_size, training_data_flat, myParam.minibatch_size);
-  data_size_t training_data_size = training_data_flat.size() / myParam.ngram_size;
-  cerr << "Number of training instances: " << training_data_size << endl;
+  shared_ptr<Vocabulary> vocab = make_shared<Vocabulary>();
+  shared_ptr<Corpus> training_corpus =
+      readCorpus(config.train_file, vocab);
+  cerr << "Number of training instances: " << training_corpus->size() << endl;
 
-  Map< Matrix<int,Dynamic,Dynamic> > training_data(training_data_flat.data(), myParam.ngram_size, training_data_size);
-  // If neither --input_vocab_size nor --input_words_file is given, set input_vocab_size to the maximum word index
-  if (myParam.input_vocab_size == 0 && myParam.input_words_file == "") {
-    myParam.input_vocab_size = training_data.topRows(myParam.ngram_size - 1).maxCoeff() + 1;
-  }
+  ContextExtractor extractor(
+      training_corpus, config.ngram_size, vocab->lookup_word("<s>"),
+      vocab->lookup_word("</s>"));
 
-  // If neither --output_vocab_size nor --output_words_file is given, set output_vocab_size to the maximum word index
-  if (myParam.output_vocab_size == 0 && myParam.output_words_file == "") {
-    myParam.output_vocab_size = training_data.row(myParam.ngram_size - 1).maxCoeff() + 1;
-  }
-
-  // Randomly shuffle training data to improve learning
-  for (data_size_t i = training_data_size - 1; i > 0; i--) {
-    data_size_t j = boost::random::uniform_int_distribution<data_size_t>(0, i - 1)(rng);
-    training_data.col(i).swap(training_data.col(j));
-  }
+  // Shuffle training data for improved performance.
+  random_shuffle(training_corpus->begin(), training_corpus->end());
 
   // Read validation data
-  vector<int> validation_data_flat;
-  int validation_data_size = 0;
-  if (myParam.validation_file != "") {
-    readDataFile(myParam.validation_file, myParam.ngram_size, validation_data_flat);
-    validation_data_size = validation_data_flat.size() / myParam.ngram_size;
-    cerr << "Number of validation instances: " << validation_data_size << endl;
-  }
-
-  Map< Matrix<int,Dynamic,Dynamic> > validation_data(validation_data_flat.data(), myParam.ngram_size, validation_data_size);
-
-  ///// Read in vocabulary file. We don't actually use it; it just gets reproduced in the output file
-  vector<string> input_words;
-  if (myParam.input_words_file != "") {
-    readWordsFile(myParam.input_words_file, input_words);
-    if (myParam.input_vocab_size == 0) {
-      myParam.input_vocab_size = input_words.size();
-    }
-  }
-
-  vector<string> output_words;
-  if (myParam.output_words_file != "") {
-    readWordsFile(myParam.output_words_file, output_words);
-    if (myParam.output_vocab_size == 0) {
-      myParam.output_vocab_size = output_words.size();
-    }
+  shared_ptr<Corpus> test_corpus;
+  if (config.validation_file != "") {
+    test_corpus = readCorpus(config.validation_file, vocab);
+    cerr << "Number of validation instances: " << test_corpus->size() << endl;
   }
 
   ///// Construct unigram model and sampler that will be used for NCE
-  vector<data_size_t> unigram_counts(myParam.output_vocab_size);
-  for (data_size_t train_id = 0; train_id < training_data_size; train_id++) {
-    int output_word = training_data(myParam.ngram_size - 1, train_id);
-    unigram_counts[output_word] += 1;
+  vector<data_size_t> unigram_counts(vocab->size());
+  for (data_size_t i = 0; i < training_corpus->size(); i++) {
+    unigram_counts[training_corpus->at(i)] += 1;
   }
   multinomial<data_size_t> unigram(unigram_counts);
 
   ///// Create and initialize the neural network and associated propagators.
 
-  model nn;
-  if (myParam.model_input_file == "") {
-   nn = model(
-        myParam.ngram_size, myParam.input_vocab_size, myParam.output_vocab_size,
-        myParam.input_embedding_dimension, myParam.num_hidden,
-        myParam.output_embedding_dimension);
-    nn.initialize(rng, myParam.init_normal, myParam.init_range, -log(myParam.output_vocab_size));
-    nn.set_activation_function(string_to_activation_function(myParam.activation_function));
-  } else {
-    cerr << "Reading model from " << myParam.model_input_file << endl;
-    vector<string> input_words, output_words;
-    nn.read(myParam.model_input_file, input_words, output_words);
-    cerr << "Done reading model..." << endl;
-  }
+  model nn(
+      config.ngram_size, vocab->size(),
+      config.input_embedding_dimension, config.num_hidden,
+      config.output_embedding_dimension);
+  nn.initialize(rng, config.init_normal, config.init_range, -log(vocab->size()));
+  nn.set_activation_function(string_to_activation_function(config.activation_function));
 
-  loss_function_type loss_function = string_to_loss_function(myParam.loss_function);
+  loss_function_type loss_function = string_to_loss_function(config.loss_function);
 
-  propagator prop(nn, myParam.minibatch_size);
-  propagator prop_validation(nn, myParam.validation_minibatch_size);
+  propagator prop(nn, config.minibatch_size);
+  propagator prop_validation(nn, config.minibatch_size);
   SoftmaxNCELoss<multinomial<data_size_t> > softmax_loss(unigram);
   // normalization parameters
-  vector_map c_h, c_h_running_gradient;
+  VectorMap c_h, c_h_running_gradient;
 
   ///////////////////////TRAINING THE NEURAL NETWORK////////////////////////////////////
   /////////////////////////////////////////////////////////////////////////////////////
 
-  data_size_t num_batches = (training_data_size-1)/myParam.minibatch_size + 1;
+  data_size_t num_batches = (training_corpus->size() - 1) / config.minibatch_size + 1;
   cerr << "Number of training minibatches: " << num_batches << endl;
 
   int num_validation_batches = 0;
-  if (validation_data_size > 0) {
-    num_validation_batches = (validation_data_size-1)/myParam.validation_minibatch_size+1;
+  if (test_corpus->size() > 0) {
+    num_validation_batches = (test_corpus->size() - 1) / config.minibatch_size + 1;
     cerr << "Number of validation minibatches: "
          << num_validation_batches << endl;
   }
 
-  double current_momentum = myParam.initial_momentum;
-  double momentum_delta = (myParam.final_momentum - myParam.initial_momentum)/(myParam.num_epochs-1);
-  double current_learning_rate = myParam.learning_rate;
+  double current_momentum = config.initial_momentum;
+  double momentum_delta = (config.final_momentum - config.initial_momentum)/(config.num_epochs-1);
+  double current_learning_rate = config.learning_rate;
   double current_validation_ll = 0.0;
 
-  int ngram_size = myParam.ngram_size;
-  int input_vocab_size = myParam.input_vocab_size;
-  int output_vocab_size = myParam.output_vocab_size;
-  int minibatch_size = myParam.minibatch_size;
-  int validation_minibatch_size = myParam.validation_minibatch_size;
-  int num_noise_samples = myParam.num_noise_samples;
+  int ngram_size = config.ngram_size;
+  data_size_t minibatch_size = config.minibatch_size;
+  int num_noise_samples = config.num_noise_samples;
 
-  if (myParam.normalization) {
-    for (data_size_t i = 0; i < training_data_size; i++) {
-      Matrix<int, Dynamic, 1> context = training_data.block(0, i, ngram_size-1, 1);
+  if (config.normalization) {
+    for (data_size_t i = 0; i < training_corpus->size(); i++) {
+      VectorInt context = extractor.extract(i);
       if (c_h.find(context) == c_h.end()) {
-        c_h[context] = -myParam.normalization_init;
+        c_h[context] = -config.normalization_init;
       }
     }
   }
 
-  for (int epoch = 0; epoch < myParam.num_epochs; epoch++) {
+  for (int epoch = 0; epoch < config.num_epochs; epoch++) {
     cerr << "Epoch " << epoch + 1 << endl;
     cerr << "Current learning rate: " << current_learning_rate << endl;
 
-    if (myParam.use_momentum) {
+    if (config.use_momentum) {
       cerr << "Current momentum: " << current_momentum << endl;
     } else {
       current_momentum = -1;
@@ -425,7 +381,7 @@ int main(int argc, char** argv) {
 
     int num_samples = 0;
     if (loss_function == LogLoss) {
-      num_samples = output_vocab_size;
+      num_samples = vocab->size();
     } else if (loss_function == NCELoss) {
       num_samples = 1 + num_noise_samples;
     }
@@ -440,22 +396,18 @@ int main(int argc, char** argv) {
         cerr << batch << "... ";
         if (batch % 200000 == 0) {
           EvaluateModel(
-              nn, prop_validation, input_words, output_words,
-              validation_data, validation_data_size,
-              validation_minibatch_size, num_validation_batches,
-              output_vocab_size, ngram_size, epoch,
-              myParam.model_output_file, myParam.input_words_file,
-              current_learning_rate, current_validation_ll);
+              config, nn, prop_validation, test_corpus, vocab,
+              epoch, current_learning_rate, current_validation_ll);
           cerr << "Current learning rate: " << current_learning_rate << endl;
           cerr << "Training minibatches: " << endl;
         }
       }
 
-      data_size_t minibatch_start_index = minibatch_size * batch;
-      int current_minibatch_size = min(static_cast<data_size_t>(minibatch_size), training_data_size - minibatch_start_index);
-      Matrix<int, Dynamic, Dynamic> minibatch = training_data.middleCols(minibatch_start_index, current_minibatch_size);
+      data_size_t start_index = minibatch_size * batch;
+      MatrixInt minibatch =
+          ExtractMinibatch(training_corpus, vocab, config, start_index);
 
-      double adjusted_learning_rate = current_learning_rate / current_minibatch_size;
+      double adjusted_learning_rate = current_learning_rate / minibatch.cols();
             ///// Forward propagation
       prop.fProp(minibatch.topRows(ngram_size-1));
 
@@ -466,10 +418,10 @@ int main(int argc, char** argv) {
 
         start_timer(3);
 
-        minibatch_samples.block(0, 0, 1, current_minibatch_size) = minibatch.bottomRows(1);
+        minibatch_samples.block(0, 0, 1, minibatch.cols()) = minibatch.bottomRows(1);
 
         for (int sample_id = 1; sample_id < num_noise_samples+1; sample_id++) {
-          for (int train_id = 0; train_id < current_minibatch_size; train_id++) {
+          for (int train_id = 0; train_id < minibatch.cols(); train_id++) {
             minibatch_samples(sample_id, train_id) = unigram.sample(rng);
           }
         }
@@ -484,11 +436,11 @@ int main(int argc, char** argv) {
         stop_timer(4);
 
         // Apply normalization parameters
-        if (myParam.normalization)
+        if (config.normalization)
         {
-          for (int train_id = 0;train_id < current_minibatch_size;train_id++)
+          for (int train_id = 0;train_id < minibatch.cols(); train_id++)
           {
-            Matrix<int,Dynamic,1> context = minibatch.block(0, train_id, ngram_size-1, 1);
+            VectorInt context = minibatch.block(0, train_id, ngram_size-1, 1);
             scores.col(train_id).array() += c_h[context];
           }
         }
@@ -497,7 +449,7 @@ int main(int argc, char** argv) {
         start_timer(5);
         // Compute conditional probabilities p(C | w, h) that a word was drawn
         // from the data or from the noise (unigram) distribution.
-        softmax_loss.fProp(scores.leftCols(current_minibatch_size),
+        softmax_loss.fProp(scores.leftCols(minibatch.cols()),
             minibatch_samples,
             probs, minibatch_log_likelihood);
         stop_timer(5);
@@ -510,9 +462,9 @@ int main(int argc, char** argv) {
         stop_timer(6);
 
         // Update the normalization parameters
-        if (myParam.normalization)
+        if (config.normalization)
         {
-          for (int train_id = 0;train_id < current_minibatch_size;train_id++)
+          for (int train_id = 0;train_id < minibatch.cols(); train_id++)
           {
             Matrix<int,Dynamic,1> context = minibatch.block(0, train_id, ngram_size-1, 1);
             c_h[context] += adjusted_learning_rate * minibatch_weights.col(train_id).sum();
@@ -521,9 +473,9 @@ int main(int argc, char** argv) {
 
         // Be careful of short minibatch
         prop.bProp(minibatch.topRows(ngram_size-1),
-            minibatch_samples.leftCols(current_minibatch_size),
-            minibatch_weights.leftCols(current_minibatch_size),
-            adjusted_learning_rate, current_momentum, myParam.L2_reg);
+            minibatch_samples.leftCols(minibatch.cols()),
+            minibatch_weights.leftCols(minibatch.cols()),
+            adjusted_learning_rate, current_momentum, config.L2_reg);
       } else if (loss_function == LogLoss) {
         ///// Standard log-likelihood
         start_timer(4);
@@ -532,7 +484,7 @@ int main(int argc, char** argv) {
 
         double minibatch_log_likelihood;
         start_timer(5);
-        SoftmaxLogLoss().fProp(scores.leftCols(current_minibatch_size),
+        SoftmaxLogLoss().fProp(scores.leftCols(minibatch.cols()),
             minibatch.row(ngram_size-1),
             probs,
             minibatch_log_likelihood);
@@ -542,14 +494,14 @@ int main(int argc, char** argv) {
         ///// Backward propagation
 
         start_timer(6);
-        SoftmaxLogLoss().bProp(minibatch.row(ngram_size-1).leftCols(current_minibatch_size),
-            probs.leftCols(current_minibatch_size),
+        SoftmaxLogLoss().bProp(minibatch.row(ngram_size-1).leftCols(minibatch.cols()),
+            probs.leftCols(minibatch.cols()),
             minibatch_weights);
         stop_timer(6);
 
-        prop.bProp(minibatch.topRows(ngram_size-1).leftCols(current_minibatch_size),
+        prop.bProp(minibatch.topRows(ngram_size-1).leftCols(minibatch.cols()),
             minibatch_weights,
-            adjusted_learning_rate, current_momentum, myParam.L2_reg);
+            adjusted_learning_rate, current_momentum, config.L2_reg);
       }
     }
 
@@ -557,7 +509,7 @@ int main(int argc, char** argv) {
 
     if (loss_function == LogLoss) {
       cerr << "Training log-likelihood: " << log_likelihood << endl;
-      cerr << "         perplexity:     " << exp(-log_likelihood/training_data_size) << endl;
+      cerr << "         perplexity:     " << exp(-log_likelihood/training_corpus->size()) << endl;
     } else if (loss_function == NCELoss) {
       cerr << "Training NCE log-likelihood: " << log_likelihood << endl;
     }
@@ -573,12 +525,8 @@ int main(int argc, char** argv) {
     #endif
 
     EvaluateModel(
-        nn, prop_validation, input_words, output_words,
-        validation_data, validation_data_size,
-        validation_minibatch_size, num_validation_batches,
-        output_vocab_size, ngram_size, epoch,
-        myParam.model_output_file, myParam.input_words_file,
-        current_learning_rate, current_validation_ll);
+        config, nn, prop_validation, test_corpus, vocab,
+        epoch, current_learning_rate, current_validation_ll);
   }
 
   return 0;

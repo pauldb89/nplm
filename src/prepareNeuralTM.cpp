@@ -1,7 +1,8 @@
 #include <iostream>
 #include <vector>
 #include <queue>
-#include <boost/unordered_map.hpp>
+#include <unordered_map>
+
 #include <tclap/CmdLine.h>
 #include <boost/algorithm/string/join.hpp>
 
@@ -12,10 +13,9 @@ using namespace TCLAP;
 #include "preprocess.h"
 #include "util.h"
 
-using namespace boost;
 using namespace nplm;
 
-void writeNgrams(const vector<vector<string> > &input_data, const vector<vector<string> > &output_data, int ngram_size, const vocabulary &input_vocab, const vocabulary &output_vocab, bool numberize, bool ngramize, const string &filename)
+void writeNgrams(const vector<vector<string> > &input_data, const vector<vector<string> > &output_data, int ngram_size, const Vocabulary &input_vocab, const Vocabulary &output_vocab, bool numberize, bool ngramize, const string &filename)
 {
     ofstream file(filename.c_str());
     if (!file)
@@ -291,95 +291,49 @@ int main(int argc, char *argv[])
     }
 
     // Construct input vocabulary
-    vocabulary input_vocab;
+    Vocabulary input_vocab;
     int input_start = input_vocab.insert_word("<s>");
     int input_stop = input_vocab.insert_word("</s>");
     input_vocab.insert_word("<null>");
 
     // read input vocabulary from file
-    if (input_words_file != "") {
-        vector<string> words;
-        readWordsFile(input_words_file,words);
-        for(vector<string>::iterator it = words.begin(); it != words.end(); ++it) {
-            input_vocab.insert_word(*it);
-        }
-        // was input_vocab_size set? if so, verify that it does not conflict with size of vocabulary read from file
-        if (input_vocab_size > 0) {
-            if (input_vocab.size() != input_vocab_size) {
-                cerr << "Error: size of input_vocabulary file " << input_vocab.size() << " != --input_vocab_size " << input_vocab_size << endl;
-            }
-        }
-        // else, set it to the size of vocabulary read from file
-        else {
-            input_vocab_size = input_vocab.size();
+    vector<string> words;
+    readWordsFile(input_words_file,words);
+    for(vector<string>::iterator it = words.begin(); it != words.end(); ++it) {
+        input_vocab.insert_word(*it);
+    }
+    // was input_vocab_size set? if so, verify that it does not conflict with size of vocabulary read from file
+    if (input_vocab_size > 0) {
+        if (input_vocab.size() != input_vocab_size) {
+            cerr << "Error: size of input_vocabulary file " << input_vocab.size() << " != --input_vocab_size " << input_vocab_size << endl;
         }
     }
-
-    // or construct input vocabulary to contain top <input_vocab_size> most frequent words; all other words replaced by <unk>
+    // else, set it to the size of vocabulary read from file
     else {
-        unordered_map<string,int> count;
-        for (int i=0; i<input_train_data.size(); i++) {
-            for (int j=0; j<input_train_data[i].size(); j++) {
-                count[input_train_data[i][j]] += 1;
-            }
-        }
-
-        input_vocab.insert_most_frequent(count, input_vocab_size);
-        if (input_vocab.size() < input_vocab_size) {
-            cerr << "warning: fewer than " << input_vocab_size << " types in training data; the unknown word will not be learned" << endl;
-        }
+        input_vocab_size = input_vocab.size();
     }
 
     // Construct output vocabulary
-    vocabulary output_vocab;
+    Vocabulary output_vocab;
     int output_start = output_vocab.insert_word("<s>");
     int output_stop = output_vocab.insert_word("</s>");
     output_vocab.insert_word("<null>");
 
     // read output vocabulary from file
-    if (output_words_file != "") {
-        vector<string> words;
-        readWordsFile(output_words_file,words);
-        for(vector<string>::iterator it = words.begin(); it != words.end(); ++it) {
-            output_vocab.insert_word(*it);
-        }
-        // was output_vocab_size set? if so, verify that it does not conflict with size of vocabulary read from file
-        if (output_vocab_size > 0) {
-            if (output_vocab.size() != output_vocab_size) {
-                cerr << "Error: size of output_vocabulary file " << output_vocab.size() << " != --output_vocab_size " << output_vocab_size << endl;
-            }
-        }
-        // else, set it to the size of vocabulary read from file
-        else {
-            output_vocab_size = output_vocab.size();
+    words.clear();
+    readWordsFile(output_words_file,words);
+    for(vector<string>::iterator it = words.begin(); it != words.end(); ++it) {
+        output_vocab.insert_word(*it);
+    }
+    // was output_vocab_size set? if so, verify that it does not conflict with size of vocabulary read from file
+    if (output_vocab_size > 0) {
+        if (output_vocab.size() != output_vocab_size) {
+            cerr << "Error: size of output_vocabulary file " << output_vocab.size() << " != --output_vocab_size " << output_vocab_size << endl;
         }
     }
-
-    // or construct output vocabulary to contain top <output_vocab_size> most frequent words; all other words replaced by <unk>
+    // else, set it to the size of vocabulary read from file
     else {
-        unordered_map<string,int> count;
-        for (int i=0; i<output_train_data.size(); i++) {
-            for (int j=0; j<output_train_data[i].size(); j++) {
-                count[output_train_data[i][j]] += 1;
-            }
-        }
-
-        output_vocab.insert_most_frequent(count, output_vocab_size);
-        if (output_vocab.size() < output_vocab_size) {
-            cerr << "warning: fewer than " << output_vocab_size << " types in training data; the unknown word will not be learned" << endl;
-        }
-    }
-
-    // write input vocabulary to file
-    if (write_input_words_file != "") {
-        cerr << "Writing vocabulary to " << write_input_words_file << endl;
-        writeWordsFile(input_vocab.words(), write_input_words_file);
-    }
-
-    // write output vocabulary to file
-    if (write_output_words_file != "") {
-        cerr << "Writing vocabulary to " << write_output_words_file << endl;
-        writeWordsFile(output_vocab.words(), write_output_words_file);
+        output_vocab_size = output_vocab.size();
     }
 
     // Write out input and output numberized n-grams

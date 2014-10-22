@@ -6,7 +6,7 @@ CXX=g++
 
 # Compiler options. Note that -DEIGEN_NO_DEBUG is essential for good performance!
 #CFLAGS=-g
-CFLAGS=-O3
+CFLAGS=-O3 -std=c++0x
 
 # Architecture. Set to x86_64 or i686 to override.
 ARCH:=$(shell uname -m)
@@ -120,7 +120,7 @@ RANLIB=ranlib
 
 BINS=trainNeuralNetwork testNeuralNetwork prepareNeuralLM testNeuralLM prepareNeuralTM
 LIBS=libneuralLM.a libneuralLM.so
-OBJS=util.o model.o
+OBJS=context_extractor.o model.o util.o vocabulary.o
 
 all: $(BINS) $(LIBS)
 

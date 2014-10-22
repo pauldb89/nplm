@@ -13,7 +13,6 @@
 
 #include "../3rdparty/Eigen/Dense"
 
-#include "param.h"
 #include "util.h"
 #include "model.h"
 #include "propagator.h"
@@ -34,20 +33,20 @@ class neuralLMShared {
 #endif
 
  public:
-  vocabulary input_vocab, output_vocab;
+  Vocabulary vocab;
   model nn;
 
   size_t cache_size;
   Eigen::Matrix<int, Dynamic, Dynamic> cache_keys;
   vector<double> cache_values;
   int cache_lookups, cache_hits;
+  hash<MatrixInt> hasher;
 
   explicit neuralLMShared(const string &filename, bool premultiply = false)
      : cache_size(0) {
     vector<string> input_words, output_words;
-    nn.read(filename, input_words, output_words);
-    input_vocab = vocabulary(input_words);
-    output_vocab = vocabulary(output_words);
+    nn.read(filename);
+    vocab.read(filename);
     // this is faster but takes more memory
     if (premultiply) {
       nn.premultiply();
@@ -63,7 +62,7 @@ class neuralLMShared {
     size_t hash;
     if (cache_size) {
       // First look in cache
-      hash = Eigen::hash_value(ngram) % cache_size; // defined in util.h
+      hash = hasher(ngram) % cache_size; // defined in util.h
       cache_lookups++;
 #ifdef WITH_THREADS // wait until nobody writes to cache
       boost::shared_lock<boost::shared_mutex> read_lock(m_cacheLock);
@@ -81,7 +80,7 @@ class neuralLMShared {
   void store_cache(const Eigen::MatrixBase<Derived> &ngram, double log_prob) {
     size_t hash;
     if (cache_size) {
-      hash = Eigen::hash_value(ngram) % cache_size;
+      hash = hasher(ngram) % cache_size;
 #ifdef WITH_THREADS // block others from reading cache
       boost::unique_lock<boost::shared_mutex> lock(m_cacheLock);
 #endif
@@ -126,8 +125,8 @@ class neuralLM {
         map_digits(0),
         width(1),
         prop(shared->nn, 1),
-        start(shared->input_vocab.lookup_word("<s>")),
-        null(shared->input_vocab.lookup_word("<null>")) {
+        start(shared->vocab.lookup_word("<s>")),
+        null(shared->vocab.lookup_word("<null>")) {
     ngram.setZero(ngram_size);
     prop.resize();
   }
@@ -141,8 +140,8 @@ class neuralLM {
       map_digits(0),
       width(1),
       prop(shared->nn, 1),
-      start(shared->input_vocab.lookup_word("<s>")),
-      null(shared->input_vocab.lookup_word("<null>")) {
+      start(shared->vocab.lookup_word("<s>")),
+      null(shared->vocab.lookup_word("<null>")) {
     ngram.setZero(ngram_size);
     prop.resize();
   }
@@ -164,13 +163,13 @@ class neuralLM {
     prop.resize(width);
   }
 
-  const vocabulary& get_vocabulary() const {
-    return shared->input_vocab;
+  const Vocabulary& get_vocabulary() const {
+    return shared->vocab;
   }
 
   int lookup_input_word(const string &word) const {
     if (!map_digits) {
-      return shared->input_vocab.lookup_word(word);
+      return shared->vocab.lookup_word(word);
     }
 
     string mapped_word(word);
@@ -180,7 +179,7 @@ class neuralLM {
       }
     }
 
-    return shared->input_vocab.lookup_word(mapped_word);
+    return shared->vocab.lookup_word(mapped_word);
   }
 
   int lookup_word(const string &word) const {
@@ -189,7 +188,7 @@ class neuralLM {
 
   int lookup_output_word(const string &word) const {
     if (!map_digits) {
-      return shared->output_vocab.lookup_word(word);
+      return shared->vocab.lookup_word(word);
     }
 
     string mapped_word(word);
@@ -199,7 +198,7 @@ class neuralLM {
       }
     }
 
-    return shared->output_vocab.lookup_word(mapped_word);
+    return shared->vocab.lookup_word(mapped_word);
   }
 
   Eigen::Matrix<int,Eigen::Dynamic,1> &staging_ngram() {
@@ -238,7 +237,7 @@ class neuralLM {
 
     start_timer(3);
     if (normalization) {
-      Eigen::Matrix<double,Eigen::Dynamic,1> scores(shared->output_vocab.size());
+      Eigen::Matrix<double,Eigen::Dynamic,1> scores(shared->vocab.size());
       prop.output_layer_node.param->fProp(prop.second_hidden_activation_node.fProp_matrix, scores);
       double logz = logsum(scores.col(0));
       log_prob = weight * (scores(output, 0) - logz);
@@ -273,13 +272,13 @@ class neuralLM {
 
     if (normalization) {
       Eigen::Matrix<double,Eigen::Dynamic,Eigen::Dynamic> scores(
-          shared->output_vocab.size(), ngram.cols());
+          shared->vocab.size(), ngram.cols());
       prop.output_layer_node.param->fProp(
           prop.second_hidden_activation_node.fProp_matrix, scores);
 
       // And softmax and loss
       Matrix<double,Dynamic,Dynamic> output_probs(
-          shared->nn.output_vocab_size, ngram.cols());
+          shared->nn.vocab_size, ngram.cols());
       double minibatch_log_likelihood;
       SoftmaxLogLoss().fProp(
           scores.leftCols(ngram.cols()), ngram.row(shared->nn.ngram_size-1),

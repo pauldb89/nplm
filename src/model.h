@@ -2,9 +2,9 @@
 #define MODEL_H
 
 #include <iostream>
-#include <vector>
+#include <random>
 #include <string>
-#include <boost/random/mersenne_twister.hpp>
+#include <vector>
 
 #include "neuralClasses.h"
 #include "Activation_function.h"
@@ -25,18 +25,18 @@ class model {
   Matrix<double,Dynamic,Dynamic,Eigen::RowMajor> input_and_output_embedding_matrix;
 
   activation_function_type activation_function;
-  int ngram_size, input_vocab_size, output_vocab_size, input_embedding_dimension, num_hidden, output_embedding_dimension;
+  int ngram_size, vocab_size;
+  int input_embedding_dimension, num_hidden, output_embedding_dimension;
   bool premultiplied;
 
   model(int ngram_size,
-        int input_vocab_size,
-        int output_vocab_size,
+        int vocab_size,
         int input_embedding_dimension,
         int num_hidden,
         int output_embedding_dimension) {
     resize(
-        ngram_size, input_vocab_size, output_vocab_size,
-        input_embedding_dimension, num_hidden, output_embedding_dimension);
+        ngram_size, vocab_size, input_embedding_dimension,
+        num_hidden, output_embedding_dimension);
   }
 
   model()
@@ -48,14 +48,13 @@ class model {
 
   void resize(
       int ngram_size,
-      int input_vocab_size,
-      int output_vocab_size,
+      int vocab_size,
       int input_embedding_dimension,
       int num_hidden,
       int output_embedding_dimension);
 
   void initialize(
-      boost::random::mt19937 &init_engine,
+      mt19937 &init_engine,
       bool init_normal,
       double init_range,
       double init_bias);
@@ -74,21 +73,12 @@ class model {
   // a better solution is needed
 
   void read(const std::string &filename);
-  void read(const std::string &filename, std::vector<std::string> &input_words, std::vector<std::string> &output_words);
-  void write(
-      const std::string &filename,
-      const std::vector<std::string> &input_words,
-      const std::vector<std::string> &output_words) const;
-  void write(
-      const std::string &filename) const;
+
+  void write(const std::string &filename) const;
 
  private:
   void readConfig(std::ifstream &config_file);
   void readConfig(const std::string &filename);
-  void write(
-      const std::string &filename,
-      const std::vector<std::string> *input_pwords,
-      const std::vector<std::string> *output_pwords) const;
 };
 
 } //namespace nplm

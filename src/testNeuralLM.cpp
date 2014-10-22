@@ -8,7 +8,7 @@
 #include "../3rdparty/Eigen/Dense"
 
 #include "neuralLM.h"
-#include "param.h"
+#include "config.h"
 #include "preprocess.h"
 
 using namespace std;
@@ -19,7 +19,7 @@ using namespace Eigen;
 using namespace nplm;
 
 int main(int argc, char *argv[]) {
-  param myParam;
+  Config config;
   bool normalization;
   bool numberize, ngramize, add_start_stop;
 
@@ -42,16 +42,16 @@ int main(int argc, char *argv[]) {
 
     cmd.parse(argc, argv);
 
-    myParam.model_input_file = arg_model_input_file.getValue();
-    myParam.test_file = arg_test_file.getValue();
+    config.model_input_file = arg_model_input_file.getValue();
+    config.test_file = arg_test_file.getValue();
 
     normalization = arg_normalization.getValue();
     numberize = arg_numberize.getValue();
     ngramize = arg_ngramize.getValue();
     add_start_stop = arg_add_start_stop.getValue();
 
-    myParam.minibatch_size = minibatch_size.getValue();
-    myParam.num_threads = num_threads.getValue();
+    config.minibatch_size = minibatch_size.getValue();
+    config.num_threads = num_threads.getValue();
 
     cerr << "Command line: " << endl;
     cerr << boost::algorithm::join(vector<string>(argv, argv+argc), " ") << endl;
@@ -71,15 +71,15 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
-  myParam.num_threads = setup_threads(myParam.num_threads);
+  config.num_threads = setup_threads(config.num_threads);
 
   ///// Create language model
 
-  neuralLM lm(myParam.model_input_file);
+  neuralLM lm(config.model_input_file);
   lm.set_normalization(normalization);
   lm.set_cache(1048576);
   int ngram_size = lm.get_order();
-  size_t minibatch_size = myParam.minibatch_size;
+  size_t minibatch_size = config.minibatch_size;
   if (minibatch_size) {
     lm.set_width(minibatch_size);
   }
@@ -88,9 +88,9 @@ int main(int argc, char *argv[]) {
 
   double log_likelihood = 0.0;
 
-  ifstream test_file(myParam.test_file.c_str());
+  ifstream test_file(config.test_file.c_str());
   if (!test_file) {
-    cerr << "error: could not open " << myParam.test_file << endl;
+    cerr << "error: could not open " << config.test_file << endl;
     exit(1);
   }
   string line;
