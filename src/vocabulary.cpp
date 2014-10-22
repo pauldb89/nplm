@@ -1,6 +1,8 @@
 #include "vocabulary.h"
 
 #include <fstream>
+#include <iostream>
+#include <sstream>
 
 namespace nplm {
 
@@ -19,30 +21,29 @@ int Vocabulary::lookup_word(const string& word) const {
 }
 
 int Vocabulary::insert_word(const string& word) {
-  auto it = index.insert(make_pair(word, words.size()));
-  if (it.second) {
+  auto ret = index.insert(make_pair(word, words.size()));
+  if (ret.second) {
     words.push_back(word);
-    return words.size();
-  } else {
-    return it.first->second;
   }
+  return ret.first->second;
 }
 
 int Vocabulary::size() const {
   return words.size();
 }
 
-void Vocabulary::read(const string& filename) {
-  ifstream fin(filename);
-  string word;
-  while (getline(fin, word)) {
-    index[word] = words.size();
-    words.push_back(word);
+void Vocabulary::read(ifstream& fin) {
+  string line;
+  while (getline(fin, line)) {
+    string word;
+    stringstream ss(line);
+    while (ss >> word) {
+      insert_word(word);
+    }
   }
 }
 
-void Vocabulary::write(const string& filename) const {
-  ofstream fout(filename);
+void Vocabulary::write(ofstream& fout) const {
   for (const string& word: words) {
     fout << word << "\n";
   }

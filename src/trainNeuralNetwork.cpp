@@ -17,6 +17,7 @@
 #include <tclap/CmdLine.h>
 
 #include "context_extractor.h"
+#include "corpus_utils.h"
 #include "graphClasses.h"
 #include "model.h"
 #include "multinomial.h"
@@ -35,25 +36,6 @@ using namespace Eigen;
 using namespace nplm;
 
 typedef unordered_map<VectorInt, double> VectorMap;
-
-MatrixInt ExtractMinibatch(
-    const shared_ptr<Corpus>& corpus,
-    const shared_ptr<Vocabulary>& vocab,
-    const Config& config,
-    data_size_t start_index) {
-  data_size_t actual_size = min(
-      static_cast<data_size_t>(corpus->size()) - start_index,
-      static_cast<data_size_t>(config.minibatch_size));
-  ContextExtractor extractor(
-      corpus, config.ngram_size, vocab->lookup_word("<s>"),
-      vocab->lookup_word("</s>"));
-  MatrixInt minibatch = MatrixInt::Zero(config.ngram_size, actual_size);
-  for (data_size_t i = 0; i < actual_size; ++i) {
-    minibatch.col(i) = extractor.extract(start_index + i);
-  }
-
-  return minibatch;
-}
 
 void EvaluateModel(
     const Config& config, const model& nn, propagator& prop_validation,
@@ -107,34 +89,13 @@ void EvaluateModel(
 
       if (config.model_output_file != "") {
         cerr << "Writing model to " << config.model_output_file << endl;
-        nn.write(config.model_output_file);
-        vocab->write(config.model_output_file);
+        ofstream fout(config.model_output_file);
+        nn.write(fout);
+        vocab->write(fout);
         cerr << "Done writing model" << endl;
       }
     }
   }
-}
-
-shared_ptr<Corpus> readCorpus(
-    const string& filename,
-    const shared_ptr<Vocabulary>& vocab) {
-  shared_ptr<Corpus> corpus = make_shared<Corpus>();
-
-  int eos_id = vocab->lookup_word("</s>");
-
-  string line;
-  ifstream fin(filename);
-  while (getline(fin, line)) {
-    string word;
-    stringstream stream(line);
-    while (stream >> word) {
-      corpus->push_back(vocab->insert_word(word));
-    }
-
-    corpus->push_back(eos_id);
-  }
-
-  return corpus;
 }
 
 int main(int argc, char** argv) {

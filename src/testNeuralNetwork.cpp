@@ -59,7 +59,8 @@ int main (int argc, char *argv[])
     ///// Create network and propagator
 
     model nn;
-    nn.read(config.model_input_file);
+    ifstream fin(config.model_input_file);
+    nn.read(fin);
     config.ngram_size = nn.ngram_size;
     propagator prop(nn, config.minibatch_size);
 

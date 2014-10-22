@@ -72,13 +72,12 @@ class model {
   // If the number of "extra" data structures like this grows,
   // a better solution is needed
 
-  void read(const std::string &filename);
+  void read(ifstream& filename);
 
-  void write(const std::string &filename) const;
+  void write(ofstream& filename) const;
 
  private:
-  void readConfig(std::ifstream &config_file);
-  void readConfig(const std::string &filename);
+  void readConfig(ifstream& config_file);
 };
 
 } //namespace nplm

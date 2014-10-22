@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <fstream>
+#include <memory>
 
 #include <boost/algorithm/string/join.hpp>
 #include <tclap/CmdLine.h>
@@ -7,12 +8,11 @@
 #include "../3rdparty/Eigen/Core"
 #include "../3rdparty/Eigen/Dense"
 
-#include "neuralLM.h"
 #include "config.h"
-#include "preprocess.h"
+#include "corpus_utils.h"
+#include "neuralLM.h"
 
 using namespace std;
-using namespace boost;
 using namespace TCLAP;
 using namespace Eigen;
 
@@ -20,8 +20,6 @@ using namespace nplm;
 
 int main(int argc, char *argv[]) {
   Config config;
-  bool normalization;
-  bool numberize, ngramize, add_start_stop;
 
   try {
     // program options //
@@ -29,29 +27,17 @@ int main(int argc, char *argv[]) {
 
     ValueArg<int> num_threads("", "num_threads", "Number of threads. Default: maximum.", false, 0, "int", cmd);
     ValueArg<int> minibatch_size("", "minibatch_size", "Minibatch size. Default: none.", false, 0, "int", cmd);
-
-    ValueArg<bool> arg_ngramize("", "ngramize", "If true, convert lines to ngrams. Default: true.", false, true, "bool", cmd);
-    ValueArg<bool> arg_numberize("", "numberize", "If true, convert words to numbers. Default: true.", false, true, "bool", cmd);
-    ValueArg<bool> arg_add_start_stop("", "add_start_stop", "If true, prepend <s> and append </s>. Default: true.", false, true, "bool", cmd);
-
-    ValueArg<bool> arg_normalization("", "normalization", "Normalize probabilities. 1 = yes, 0 = no. Default: 0.", false, 0, "bool", cmd);
-
     ValueArg<string> arg_test_file("", "test_file", "Test file (one tokenized sentence per line).", true, "", "string", cmd);
-
     ValueArg<string> arg_model_input_file("", "model_input_file", "Language model file.", true, "", "string", cmd);
+    ValueArg<bool> arg_normalization("", "normalization", "Normalize probabilities. 1 = yes, 0 = no. Default: 1.", false, 1, "bool", cmd);
 
     cmd.parse(argc, argv);
 
     config.model_input_file = arg_model_input_file.getValue();
     config.test_file = arg_test_file.getValue();
-
-    normalization = arg_normalization.getValue();
-    numberize = arg_numberize.getValue();
-    ngramize = arg_ngramize.getValue();
-    add_start_stop = arg_add_start_stop.getValue();
-
     config.minibatch_size = minibatch_size.getValue();
     config.num_threads = num_threads.getValue();
+    config.normalization = arg_normalization.getValue();
 
     cerr << "Command line: " << endl;
     cerr << boost::algorithm::join(vector<string>(argv, argv+argc), " ") << endl;
@@ -59,10 +45,6 @@ int main(int argc, char *argv[]) {
     const string sep(" Value: ");
     cerr << arg_test_file.getDescription() << sep << arg_test_file.getValue() << endl;
     cerr << arg_model_input_file.getDescription() << sep << arg_model_input_file.getValue() << endl;
-
-    cerr << arg_normalization.getDescription() << sep << arg_normalization.getValue() << endl;
-    cerr << arg_ngramize.getDescription() << sep << arg_ngramize.getValue() << endl;
-    cerr << arg_add_start_stop.getDescription() << sep << arg_add_start_stop.getValue() << endl;
 
     cerr << minibatch_size.getDescription() << sep << minibatch_size.getValue() << endl;
     cerr << num_threads.getDescription() << sep << num_threads.getValue() << endl;
@@ -76,79 +58,27 @@ int main(int argc, char *argv[]) {
   ///// Create language model
 
   neuralLM lm(config.model_input_file);
-  lm.set_normalization(normalization);
+  lm.set_normalization(config.normalization);
   lm.set_cache(1048576);
-  int ngram_size = lm.get_order();
+  config.ngram_size = lm.get_order();
   size_t minibatch_size = config.minibatch_size;
-  if (minibatch_size) {
-    lm.set_width(minibatch_size);
-  }
+  lm.set_width(minibatch_size);
 
-  ///// Read test data
+  shared_ptr<Corpus> test_corpus =
+      readCorpus(config.test_file, lm.get_vocabulary());
 
-  double log_likelihood = 0.0;
+  double log_likelihood = 0;
+  for (int test_id = 0; test_id < test_corpus->size(); test_id += minibatch_size) {
+    MatrixInt minibatch =
+        ExtractMinibatch(test_corpus, lm.get_vocabulary(), config, test_id);
 
-  ifstream test_file(config.test_file.c_str());
-  if (!test_file) {
-    cerr << "error: could not open " << config.test_file << endl;
-    exit(1);
-  }
-  string line;
-
-  vector<int> start;
-  vector<vector<int> > ngrams;
-
-  while (getline(test_file, line)) {
-    vector<string> words;
-    splitBySpace(line, words);
-
-    vector<vector<int> > sent_ngrams;
-    preprocessWords(
-        words, sent_ngrams, ngram_size, lm.get_vocabulary(), numberize,
-        add_start_stop, ngramize);
-
-    start.push_back(ngrams.size());
-    copy(sent_ngrams.begin(), sent_ngrams.end(), back_inserter(ngrams));
-  }
-  start.push_back(ngrams.size());
-
-  if (minibatch_size == 0) {
-    // Score one n-gram at a time. This is how the LM would be queried from a decoder.
-    for (int sent_id = 0; sent_id < start.size() - 1; sent_id++) {
-      double sent_log_prob = 0.0;
-      for (int j = start[sent_id]; j < start[sent_id + 1]; j++) {
-          sent_log_prob += lm.lookup_ngram(ngrams[j]);
-      }
-      log_likelihood += sent_log_prob;
-    }
-  } else {
-    // Score a whole minibatch at a time.
-    Matrix<double,1,Dynamic> log_probs(ngrams.size());
-
-    Matrix<int,Dynamic,Dynamic> minibatch(ngram_size, minibatch_size);
-    minibatch.setZero();
-    for (int test_id = 0; test_id < ngrams.size(); test_id += minibatch_size) {
-      int current_minibatch_size = min(minibatch_size, ngrams.size() - test_id);
-      for (int j = 0; j < current_minibatch_size; j++) {
-        minibatch.col(j) = Map< Matrix<int,Dynamic,1> >(
-            ngrams[test_id + j].data(), ngram_size);
-      }
-      lm.lookup_ngram(
-          minibatch.leftCols(current_minibatch_size),
-          log_probs.middleCols(test_id, current_minibatch_size));
-    }
-
-    for (int sent_id = 0; sent_id < start.size() - 1; sent_id++) {
-      double sent_log_prob = 0.0;
-      for (int j = start[sent_id]; j < start[sent_id + 1]; j++) {
-        sent_log_prob += log_probs[j];
-      }
-      log_likelihood += sent_log_prob;
-    }
+    Matrix<double, 1, Dynamic> log_probs(minibatch.cols());
+    lm.lookup_ngram(minibatch.leftCols(minibatch.cols()), log_probs);
+    log_likelihood += log_probs.sum();
   }
 
   cerr << "Test log10-likelihood: " << log_likelihood << endl;
-  cerr << "Perplexity: " << exp(-log_likelihood / ngrams.size()) << endl;
+  cerr << "Perplexity: " << exp(-log_likelihood / test_corpus->size()) << endl;
 #ifdef USE_CHRONO
   cerr << "Propagation times:";
   for (int i = 0; i < timer.size(); i++) {

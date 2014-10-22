@@ -53,12 +53,12 @@ void model::premultiply() {
   premultiplied = true;
 }
 
-void model::readConfig(ifstream &config_file) {
+void model::readConfig(ifstream &fin) {
   string line;
   vector<string> fields;
   int ngram_size, vocab_size, input_embedding_dimension, num_hidden, output_embedding_dimension;
   activation_function_type activation_function = this->activation_function;
-  while (getline(config_file, line) && line != "") {
+  while (getline(fin, line) && line != "") {
     splitBySpace(line, fields);
 	  if (fields[0] == "ngram_size") {
 	    ngram_size = boost::lexical_cast<int>(fields[1]);
@@ -89,37 +89,26 @@ void model::readConfig(ifstream &config_file) {
   set_activation_function(activation_function);
 }
 
-void model::readConfig(const string &filename) {
-  ifstream config_file(filename.c_str());
-  if (!config_file) {
-    cerr << "error: could not open config file " << filename << endl;
-	  exit(1);
-  }
-  readConfig(config_file);
-  config_file.close();
-}
-
-void model::read(const string &filename) {
-  ifstream file(filename.c_str());
-  if (!file) {
-    throw runtime_error("Could not open file " + filename);
+void model::read(ifstream& fin) {
+  if (!fin) {
+    throw runtime_error("Could not open file");
   }
 
   string line;
 
-  while (getline(file, line)) {
+  while (getline(fin, line)) {
   	if (line == "\\config") {
-	    readConfig(file);
+	    readConfig(fin);
 	  } else if (line == "\\input_embeddings") {
-	    input_layer.read(file);
+	    input_layer.read(fin);
     } else if (line == "\\hidden_weights 1") {
-	    first_hidden_linear.read(file);
+	    first_hidden_linear.read(fin);
     } else if (line == "\\hidden_weights 2") {
-	    second_hidden_linear.read(file);
+	    second_hidden_linear.read(fin);
     } else if (line == "\\output_weights") {
-	    output_layer.read_weights(file);
+	    output_layer.read_weights(fin);
     } else if (line == "\\output_biases") {
-	    output_layer.read_biases(file);
+	    output_layer.read_biases(fin);
     } else if (line == "\\end") {
 	    break;
     } else if (line == "") {
@@ -127,50 +116,47 @@ void model::read(const string &filename) {
     } else {
 	    cerr << "warning: unrecognized section: " << line << endl;
 	    // skip over section
-	    while (getline(file, line) && line != "") { }
+	    while (getline(fin, line) && line != "") { }
 	  }
   }
-  file.close();
 }
 
-void model::write(const string &filename) const {
-  ofstream file(filename.c_str());
-  if (!file) {
-    throw runtime_error("Could not open file " + filename);
+void model::write(ofstream& fout) const {
+  if (!fout) {
+    throw runtime_error("Could not open file");
   }
 
-  file << "\\config" << endl;
-  file << "version 1" << endl;
-  file << "ngram_size " << ngram_size << endl;
-  file << "vocab_size " << vocab_size << endl;
-  file << "input_embedding_dimension " << input_embedding_dimension << endl;
-  file << "num_hidden " << num_hidden << endl;
-  file << "output_embedding_dimension " << output_embedding_dimension << endl;
-  file << "activation_function " << activation_function_to_string(activation_function) << endl;
-  file << endl;
+  fout << "\\config" << endl;
+  fout << "version 1" << endl;
+  fout << "ngram_size " << ngram_size << endl;
+  fout << "vocab_size " << vocab_size << endl;
+  fout << "input_embedding_dimension " << input_embedding_dimension << endl;
+  fout << "num_hidden " << num_hidden << endl;
+  fout << "output_embedding_dimension " << output_embedding_dimension << endl;
+  fout << "activation_function " << activation_function_to_string(activation_function) << endl;
+  fout << endl;
 
-  file << "\\input_embeddings" << endl;
-  input_layer.write(file);
-  file << endl;
+  fout << "\\input_embeddings" << endl;
+  input_layer.write(fout);
+  fout << endl;
 
-  file << "\\hidden_weights 1" << endl;
-  first_hidden_linear.write(file);
-  file << endl;
+  fout << "\\hidden_weights 1" << endl;
+  first_hidden_linear.write(fout);
+  fout << endl;
 
-  file << "\\hidden_weights 2" << endl;
-  second_hidden_linear.write(file);
-  file << endl;
+  fout << "\\hidden_weights 2" << endl;
+  second_hidden_linear.write(fout);
+  fout << endl;
 
-  file << "\\output_weights" << endl;
-  output_layer.write_weights(file);
-  file << endl;
+  fout << "\\output_weights" << endl;
+  output_layer.write_weights(fout);
+  fout << endl;
 
-  file << "\\output_biases" << endl;
-  output_layer.write_biases(file);
-  file << endl;
+  fout << "\\output_biases" << endl;
+  output_layer.write_biases(fout);
+  fout << endl;
 
-  file << "\\end" << endl;
-  file.close();
+  fout << "\\end" << endl;
 }
 
 } // namespace nplm

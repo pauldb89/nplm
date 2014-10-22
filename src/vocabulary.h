@@ -19,9 +19,9 @@ class Vocabulary {
 
   int size() const;
 
-  void read(const string& filename);
+  void read(ifstream& filename);
 
-  void write(const string& filename) const;
+  void write(ofstream& filename) const;
 
  private:
   vector<string> words;
