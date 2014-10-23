@@ -118,7 +118,7 @@ RANLIB=ranlib
 
 # Rules
 
-BINS=trainNeuralNetwork testNeuralNetwork prepareNeuralLM testNeuralLM prepareNeuralTM
+BINS=trainNeuralNetwork testNeuralNetwork testNeuralLM prepareNeuralTM
 LIBS=libneuralLM.a libneuralLM.so
 OBJS=context_extractor.o corpus_utils.o minibatch_extractor.o model.o util.o vocabulary.o
 
@@ -143,9 +143,6 @@ trainNeuralNetwork: trainNeuralNetwork.o $(OBJS)
 	$(CXX) $(ALL_LDFLAGS) $^ $(ALL_LDLIBS) -o $@
 
 testNeuralNetwork: testNeuralNetwork.o $(OBJS)
-	$(CXX) $(ALL_LDFLAGS) $^ $(ALL_LDLIBS) -o $@
-
-prepareNeuralLM: prepareNeuralLM.o $(OBJS)
 	$(CXX) $(ALL_LDFLAGS) $^ $(ALL_LDLIBS) -o $@
 
 testNeuralLM: testNeuralLM.o $(OBJS)
