@@ -120,7 +120,7 @@ RANLIB=ranlib
 
 BINS=trainNeuralNetwork testNeuralNetwork prepareNeuralLM testNeuralLM prepareNeuralTM
 LIBS=libneuralLM.a libneuralLM.so
-OBJS=context_extractor.o corpus_utils.o model.o util.o vocabulary.o
+OBJS=context_extractor.o corpus_utils.o minibatch_extractor.o model.o util.o vocabulary.o
 
 all: $(BINS) $(LIBS)
 

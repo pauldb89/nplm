@@ -19,6 +19,7 @@
 #include "context_extractor.h"
 #include "corpus_utils.h"
 #include "graphClasses.h"
+#include "minibatch_extractor.h"
 #include "model.h"
 #include "multinomial.h"
 #include "neuralClasses.h"
@@ -45,6 +46,7 @@ void EvaluateModel(
     double log_likelihood = 0.0;
     Matrix<double,Dynamic,Dynamic> scores(vocab->size(), config.minibatch_size);
     Matrix<double,Dynamic,Dynamic> output_probs(vocab->size(), config.minibatch_size);
+    MinibatchExtractor extractor(test_corpus, vocab, config);
 
     cerr << endl;
     cerr << "Validation minibatches: " << endl;
@@ -55,8 +57,7 @@ void EvaluateModel(
       }
 
       data_size_t start_index = config.minibatch_size * batch;
-      MatrixInt minibatch =
-          ExtractMinibatch(test_corpus, vocab, config, start_index);
+      MatrixInt minibatch = extractor.extract(start_index);
 
       prop_validation.fProp(minibatch.topRows(config.ngram_size - 1));
 
@@ -257,13 +258,6 @@ int main(int argc, char** argv) {
       readCorpus(config.train_file, vocab);
   cerr << "Number of training instances: " << training_corpus->size() << endl;
 
-  ContextExtractor extractor(
-      training_corpus, config.ngram_size, vocab->lookup_word("<s>"),
-      vocab->lookup_word("</s>"));
-
-  // Shuffle training data for improved performance.
-  random_shuffle(training_corpus->begin(), training_corpus->end());
-
   // Read validation data
   shared_ptr<Corpus> test_corpus;
   if (config.validation_file != "") {
@@ -318,6 +312,9 @@ int main(int argc, char** argv) {
   int num_noise_samples = config.num_noise_samples;
 
   if (config.normalization) {
+    ContextExtractor extractor(
+        training_corpus, ngram_size, vocab->lookup_word("<s>"),
+        vocab->lookup_word("</s>"));
     for (data_size_t i = 0; i < training_corpus->size(); i++) {
       VectorInt context = extractor.extract(i);
       if (c_h.find(context) == c_h.end()) {
@@ -326,6 +323,7 @@ int main(int argc, char** argv) {
     }
   }
 
+  MinibatchExtractor extractor(training_corpus, vocab, config);
   for (int epoch = 0; epoch < config.num_epochs; epoch++) {
     cerr << "Epoch " << epoch + 1 << endl;
     cerr << "Current learning rate: " << current_learning_rate << endl;
@@ -365,8 +363,7 @@ int main(int argc, char** argv) {
       }
 
       data_size_t start_index = minibatch_size * batch;
-      MatrixInt minibatch =
-          ExtractMinibatch(training_corpus, vocab, config, start_index);
+      MatrixInt minibatch = extractor.extract(start_index);
 
       double adjusted_learning_rate = current_learning_rate / minibatch.cols();
             ///// Forward propagation

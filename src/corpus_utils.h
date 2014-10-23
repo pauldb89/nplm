@@ -9,13 +9,6 @@
 
 namespace nplm {
 
-MatrixInt ExtractMinibatch(
-    const shared_ptr<Corpus>& corpus,
-    const shared_ptr<Vocabulary>& vocab,
-    const Config& config,
-    data_size_t start_index);
-
-
 shared_ptr<Corpus> readCorpus(
     const string& filename,
     const shared_ptr<Vocabulary>& vocab);

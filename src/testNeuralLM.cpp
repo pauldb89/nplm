@@ -10,6 +10,7 @@
 
 #include "config.h"
 #include "corpus_utils.h"
+#include "minibatch_extractor.h"
 #include "neuralLM.h"
 
 using namespace std;
@@ -67,11 +68,10 @@ int main(int argc, char *argv[]) {
   shared_ptr<Corpus> test_corpus =
       readCorpus(config.test_file, lm.get_vocabulary());
 
+  MinibatchExtractor extractor(test_corpus, lm.get_vocabulary(), config);
   double log_likelihood = 0;
   for (int test_id = 0; test_id < test_corpus->size(); test_id += minibatch_size) {
-    MatrixInt minibatch =
-        ExtractMinibatch(test_corpus, lm.get_vocabulary(), config, test_id);
-
+    MatrixInt minibatch = extractor.extract(test_id);
     Matrix<double, 1, Dynamic> log_probs(minibatch.cols());
     lm.lookup_ngram(minibatch.leftCols(minibatch.cols()), log_probs);
     log_likelihood += log_probs.sum();

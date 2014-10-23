@@ -4,25 +4,6 @@
 
 namespace nplm {
 
-MatrixInt ExtractMinibatch(
-    const shared_ptr<Corpus>& corpus,
-    const shared_ptr<Vocabulary>& vocab,
-    const Config& config,
-    data_size_t start_index) {
-  data_size_t actual_size = min(
-      static_cast<data_size_t>(corpus->size()) - start_index,
-      static_cast<data_size_t>(config.minibatch_size));
-  ContextExtractor extractor(
-      corpus, config.ngram_size, vocab->lookup_word("<s>"),
-      vocab->lookup_word("</s>"));
-  MatrixInt minibatch(config.ngram_size, actual_size);
-  for (data_size_t i = 0; i < actual_size; ++i) {
-    minibatch.col(i) = extractor.extract(start_index + i);
-  }
-
-  return minibatch;
-}
-
 shared_ptr<Corpus> readCorpus(
     const string& filename,
     const shared_ptr<Vocabulary>& vocab) {
