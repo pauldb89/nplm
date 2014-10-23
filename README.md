@@ -32,35 +32,16 @@ This creates several executables and the `neuralLM.a` library in the `src` direc
 
 ### Prepare the training data
 
-First tokenize, lowercase, etc. your training data using your favourite tools. After that, run:
-
-    nplm/src/prepareNeuralLM --train_text training.en \
-                             --train_file training.ngrams \
-                             --validation_text dev.en \
-                             --validation_file dev.ngrams \
-                             --ngram_size 5 \
-                             --vocab_size <vocab_size> \
-                             --write_words_file training.vocab
-
-Set `vocab_size` to a value lower than the true vocabulary size, so the model can learn a representation for unknown words (marked with the `<unk>` token).
-
-Alternatively, you can use an existing vocabulary by setting the `--words_file`
-flag instead of `--write_words_file` and `--vocab_size`. The vocabulary file
-must contain one word per line. Note that the vocab file MUST include `<s>`,
-`</s>` and `<null>`, otherwise these tokens will get mapped to `<unk>`.
-
-This script does the following:
-- It creates a vocabulary of the `vocab-size` most frequent words, mapping all other
-  words to `<unk>`.
-- Adds start `<s>` and stop `</s>` symbols.
-- Converts both the training data and the validation data to numberized n-grams (one per line).
+First tokenize, lowercase, etc. your training data using your favourite tools.
+After that, run the data preparation scripts available in
+[OxLM](https://github.com/pauldb89/oxlm) to replace the rare words with the `<UNK>` symbol.
 
 ### Train a language model
 
 Run:
 
-    trainNeuralNetwork --train_file train.ngrams \
-                       --validation_file dev.ngrams \
+    trainNeuralNetwork --train_file training.unk.en \
+                       --validation_file dev.unk.en \
                        --num_epochs 10 \
                        --words_file training.vocab \
                        --model_prefix nplm
