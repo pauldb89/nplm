@@ -43,8 +43,14 @@ Run:
     trainNeuralNetwork --train_file training.unk.en \
                        --validation_file dev.unk.en \
                        --num_epochs 10 \
-                       --words_file training.vocab \
-                       --model_prefix nplm
+                       --model_prefix nplm \
+                       --minibatch_size 64 \
+                       --ngram_size 5 \
+                       --learning_rate 0.05 \
+                       --num_threads 10 \
+                       --input_embedding_dimension 200 \
+                       --num_hidden 200 \
+                       --output_embedding_dimension 200
 
 After each pass through the data, the trainer will print the
 log-likelihood of both the training data and validation data (higher
