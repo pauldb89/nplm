@@ -140,9 +140,8 @@ void readDataFile(
     }
 
     n_lines++;
-    cerr << n_lines << "\n";
     if (minibatch_size && n_lines % (minibatch_size * 10000) == 0) {
-      // cerr << n_lines / minibatch_size << "...";
+      cerr << n_lines / minibatch_size << "...";
     }
   }
   cerr << "done." << endl;
