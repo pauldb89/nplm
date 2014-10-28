@@ -20,18 +20,13 @@
 #include "vocabulary.h"
 
 #ifdef WITH_THREADS // included in multi-threaded moses project
-#include <boost/thread/shared_mutex.hpp>
 #endif
 
 using namespace std;
 
 namespace nplm {
 
-class neuralLMShared {
-#ifdef WITH_THREADS
-  mutable boost::shared_mutex m_cacheLock;
-#endif
-
+class NeuralLMCache {
  public:
   shared_ptr<Vocabulary> vocab;
   model nn;
@@ -42,7 +37,7 @@ class neuralLMShared {
   int cache_lookups, cache_hits;
   hash<MatrixInt> hasher;
 
-  explicit neuralLMShared(const string &filename, bool premultiply = false)
+  explicit NeuralLMCache(const string &filename, bool premultiply = false)
      : cache_size(0) {
     ifstream fin(filename);
     nn.read(fin);
@@ -65,9 +60,6 @@ class neuralLMShared {
       // First look in cache
       hash = hasher(ngram) % cache_size; // defined in util.h
       cache_lookups++;
-#ifdef WITH_THREADS // wait until nobody writes to cache
-      boost::shared_lock<boost::shared_mutex> read_lock(m_cacheLock);
-#endif
       if (cache_keys.col(hash) == ngram) {
         cache_hits++;
         return cache_values[hash];
@@ -82,9 +74,6 @@ class neuralLMShared {
     size_t hash;
     if (cache_size) {
       hash = hasher(ngram) % cache_size;
-#ifdef WITH_THREADS // block others from reading cache
-      boost::unique_lock<boost::shared_mutex> lock(m_cacheLock);
-#endif
       // Update cache
       cache_keys.col(hash) = ngram;
       cache_values[hash] = log_prob;
@@ -102,7 +91,7 @@ class neuralLMShared {
 
 class neuralLM {
   // Big stuff shared across instances.
-  boost::shared_ptr<neuralLMShared> shared;
+  NeuralLMCache cache;
 
   bool normalization;
   char map_digits;
@@ -119,30 +108,30 @@ class neuralLM {
 
  public:
   neuralLM(const string &filename, bool premultiply = false)
-      : shared(new neuralLMShared(filename, premultiply)),
-        ngram_size(shared->nn.ngram_size),
+      : cache(NeuralLMCache(filename, premultiply)),
+        ngram_size(cache.nn.ngram_size),
         normalization(false),
         weight(1.),
         map_digits(0),
         width(1),
-        prop(shared->nn, 1),
-        start(shared->vocab->lookup_word("<s>")),
-        null(shared->vocab->lookup_word("<null>")) {
+        prop(cache.nn, 1),
+        start(cache.vocab->lookup_word("<s>")),
+        null(cache.vocab->lookup_word("<null>")) {
     ngram.setZero(ngram_size);
     prop.resize();
   }
 
   // initialize neuralLM class that shares vocab and model with base instance (for multithreaded decoding)
   neuralLM(const neuralLM &baseInstance)
-    : shared(baseInstance.shared),
-      ngram_size(shared->nn.ngram_size),
+    : cache(baseInstance.cache),
+      ngram_size(cache.nn.ngram_size),
       normalization(false),
       weight(1.),
       map_digits(0),
       width(1),
-      prop(shared->nn, 1),
-      start(shared->vocab->lookup_word("<s>")),
-      null(shared->vocab->lookup_word("<null>")) {
+      prop(cache.nn, 1),
+      start(cache.vocab->lookup_word("<s>")),
+      null(cache.vocab->lookup_word("<null>")) {
     ngram.setZero(ngram_size);
     prop.resize();
   }
@@ -165,12 +154,16 @@ class neuralLM {
   }
 
   shared_ptr<Vocabulary> get_vocabulary() const {
-    return shared->vocab;
+    return cache.vocab;
+  }
+
+  Vocabulary get_vocab() const {
+    return *cache.vocab;
   }
 
   int lookup_input_word(const string &word) const {
     if (!map_digits) {
-      return shared->vocab->lookup_word(word);
+      return cache.vocab->lookup_word(word);
     }
 
     string mapped_word(word);
@@ -180,7 +173,7 @@ class neuralLM {
       }
     }
 
-    return shared->vocab->lookup_word(mapped_word);
+    return cache.vocab->lookup_word(mapped_word);
   }
 
   int lookup_word(const string &word) const {
@@ -189,7 +182,7 @@ class neuralLM {
 
   int lookup_output_word(const string &word) const {
     if (!map_digits) {
-      return shared->vocab->lookup_word(word);
+      return cache.vocab->lookup_word(word);
     }
 
     string mapped_word(word);
@@ -199,7 +192,7 @@ class neuralLM {
       }
     }
 
-    return shared->vocab->lookup_word(mapped_word);
+    return cache.vocab->lookup_word(mapped_word);
   }
 
   Eigen::Matrix<int,Eigen::Dynamic,1> &staging_ngram() {
@@ -215,7 +208,7 @@ class neuralLM {
     assert (ngram.rows() == ngram_size);
     assert (ngram.cols() == 1);
 
-    double cached = shared->lookup_cache(ngram);
+    double cached = cache.lookup_cache(ngram);
     if (cached != 0) {
       return cached;
     }
@@ -238,7 +231,7 @@ class neuralLM {
 
     start_timer(3);
     if (normalization) {
-      Eigen::Matrix<double,Eigen::Dynamic,1> scores(shared->vocab->size());
+      Eigen::Matrix<double,Eigen::Dynamic,1> scores(cache.vocab->size());
       prop.output_layer_node.param->fProp(prop.second_hidden_activation_node.fProp_matrix, scores);
       double logz = logsum(scores.col(0));
       log_prob = weight * (scores(output, 0) - logz);
@@ -248,7 +241,7 @@ class neuralLM {
     }
     stop_timer(3);
 
-    shared->store_cache(ngram, log_prob);
+    cache.store_cache(ngram, log_prob);
 
 #ifndef WITH_THREADS
 #ifdef __INTEL_MKL__
@@ -273,16 +266,16 @@ class neuralLM {
 
     if (normalization) {
       Eigen::Matrix<double,Eigen::Dynamic,Eigen::Dynamic> scores(
-          shared->vocab->size(), ngram.cols());
+          cache.vocab->size(), ngram.cols());
       prop.output_layer_node.param->fProp(
           prop.second_hidden_activation_node.fProp_matrix, scores);
 
       // And softmax and loss
       Matrix<double,Dynamic,Dynamic> output_probs(
-          shared->nn.vocab_size, ngram.cols());
+          cache.nn.vocab_size, ngram.cols());
       double minibatch_log_likelihood;
       SoftmaxLogLoss().fProp(
-          scores.leftCols(ngram.cols()), ngram.row(shared->nn.ngram_size-1),
+          scores.leftCols(ngram.cols()), ngram.row(cache.nn.ngram_size-1),
           output_probs, minibatch_log_likelihood);
 
       for (int j = 0; j < ngram.cols(); j++) {
@@ -322,11 +315,11 @@ class neuralLM {
   }
 
    void set_cache(size_t cache_size) {
-    shared->set_cache(cache_size);
+    cache.set_cache(cache_size);
   }
 
   double cache_hit_rate() {
-    return static_cast<double>(shared->cache_hits) / shared->cache_lookups;
+    return static_cast<double>(cache.cache_hits) / cache.cache_lookups;
   }
 };
 
