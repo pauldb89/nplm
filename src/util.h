@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <iostream>
 #include <fstream>
 #include <random>
@@ -18,6 +19,7 @@
 #include "maybe_omp.h"
 
 using namespace std;
+using namespace std::chrono;
 using namespace Eigen;
 
 typedef long long int data_size_t; // training data can easily exceed 2G instances
@@ -59,6 +61,13 @@ class hash<VectorInt> {
 
 namespace nplm
 {
+
+typedef high_resolution_clock Clock;
+typedef Clock::time_point Time;
+
+Time GetTime();
+
+double GetDuration(const Time& start_time, const Time& stop_time);
 
 void splitBySpace(const std::string &line, std::vector<std::string> &items);
 void readWordsFile(std::ifstream &TRAININ, std::vector<std::string> &word_list);

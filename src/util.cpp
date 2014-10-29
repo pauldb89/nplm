@@ -21,6 +21,14 @@ using namespace std;
 namespace nplm
 {
 
+Time GetTime() {
+  return Clock::now();
+}
+
+double GetDuration(const Time& start_time, const Time& end_time) {
+  return duration_cast<milliseconds>(end_time - start_time).count() / 1000.0;
+}
+
 void splitBySpace(const std::string &line, std::vector<std::string> &items)
 {
     string copy(line);

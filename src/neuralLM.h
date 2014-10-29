@@ -1,6 +1,7 @@
 #ifndef NEURALLM_H
 #define NEURALLM_H
 
+#include <chrono>
 #include <vector>
 #include <iostream>
 #include <fstream>
@@ -8,6 +9,8 @@
 #include <stdexcept>
 #include <cctype>
 #include <cstdlib>
+
+#include <boost/functional/hash.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/shared_ptr.hpp>
 
@@ -26,72 +29,61 @@ using namespace std;
 
 namespace nplm {
 
-class NeuralLMCache {
+class NeuralModel {
  public:
-  shared_ptr<Vocabulary> vocab;
-  model nn;
-
-  size_t cache_size;
-  Eigen::Matrix<int, Dynamic, Dynamic> cache_keys;
-  vector<double> cache_values;
-  int cache_lookups, cache_hits;
-  hash<MatrixInt> hasher;
-
-  explicit NeuralLMCache(const string &filename, bool premultiply = false)
-     : cache_size(0) {
+  explicit NeuralModel(const string& filename, bool premultiply = false) {
     ifstream fin(filename);
-    nn.read(fin);
+    nn = make_shared<model>();
+    nn->read(fin);
+
     vocab = make_shared<Vocabulary>();
     vocab->read(fin);
-    // this is faster but takes more memory
+
     if (premultiply) {
-      nn.premultiply();
-    }
-    if (cache_size) {
-      cache_keys.resize(nn.ngram_size, cache_size);
-      cache_keys.fill(-1);
+      nn->premultiply();
     }
   }
 
-  template <typename Derived>
-  double lookup_cache(const Eigen::MatrixBase<Derived> &ngram) {
-    size_t hash;
-    if (cache_size) {
-      // First look in cache
-      hash = hasher(ngram) % cache_size; // defined in util.h
-      cache_lookups++;
-      if (cache_keys.col(hash) == ngram) {
-        cache_hits++;
-        return cache_values[hash];
-      }
-    }
-
-    return 0;
+  int getOrder() const {
+    return nn->ngram_size;
   }
 
-  template <typename Derived>
-  void store_cache(const Eigen::MatrixBase<Derived> &ngram, double log_prob) {
-    size_t hash;
-    if (cache_size) {
-      hash = hasher(ngram) % cache_size;
-      // Update cache
-      cache_keys.col(hash) = ngram;
-      cache_values[hash] = log_prob;
-    }
+  shared_ptr<model> getModel() const {
+    return nn;
   }
 
-  void set_cache(size_t cache_size) {
-    this->cache_size = cache_size;
-    cache_keys.resize(nn.ngram_size, cache_size);
-    cache_keys.fill(-1); // clears cache
-    cache_values.resize(cache_size);
-    cache_lookups = cache_hits = 0;
+  shared_ptr<Vocabulary> getVocabulary() const {
+    return vocab;
   }
+
+ private:
+  shared_ptr<model> nn;
+  shared_ptr<Vocabulary> vocab;
 };
 
-class neuralLM {
-  // Big stuff shared across instances.
+class NeuralLMCache {
+ public:
+  double lookup(const vector<int>& ngram) const {
+    auto it = cache.find(ngram);
+    return it == cache.end() ? 0 : it->second;
+  }
+
+  void store(const vector<int>& ngram, double value) {
+    cache[ngram] = value;
+  }
+
+  void clear() {
+    cache.clear();
+  }
+
+ private:
+  unordered_map<vector<int>, double, boost::hash<vector<int>>> cache;
+};
+
+class NeuralLM {
+  shared_ptr<NeuralModel> sharedModel;
   NeuralLMCache cache;
+  shared_ptr<Vocabulary> vocab;
 
   bool normalization;
   char map_digits;
@@ -102,38 +94,37 @@ class neuralLM {
   int width;
 
   double weight;
-
-  Eigen::Matrix<int,Eigen::Dynamic,1> ngram; // buffer for lookup_ngram
-  int start, null;
+  int START_ID, NULL_ID;
 
  public:
-  neuralLM(const string &filename, bool premultiply = false)
-      : cache(NeuralLMCache(filename, premultiply)),
-        ngram_size(cache.nn.ngram_size),
-        normalization(false),
-        weight(1.),
-        map_digits(0),
-        width(1),
-        prop(cache.nn, 1),
-        start(cache.vocab->lookup_word("<s>")),
-        null(cache.vocab->lookup_word("<null>")) {
-    ngram.setZero(ngram_size);
+  NeuralLM(const string &filename, bool premultiply = false)
+      : normalization(false), weight(1.), map_digits(0), width(1) {
+    sharedModel = make_shared<NeuralModel>(filename, premultiply);
+
+    ngram_size = sharedModel->getOrder();
+    vocab = sharedModel->getVocabulary();
+
+    prop = propagator(*sharedModel->getModel(), 1);
     prop.resize();
+
+    START_ID = vocab->lookup_word("<s>");
+    NULL_ID = vocab->lookup_word("<null>");
   }
 
-  // initialize neuralLM class that shares vocab and model with base instance (for multithreaded decoding)
-  neuralLM(const neuralLM &baseInstance)
-    : cache(baseInstance.cache),
-      ngram_size(cache.nn.ngram_size),
-      normalization(false),
-      weight(1.),
-      map_digits(0),
-      width(1),
-      prop(cache.nn, 1),
-      start(cache.vocab->lookup_word("<s>")),
-      null(cache.vocab->lookup_word("<null>")) {
-    ngram.setZero(ngram_size);
+  // initialize NeuralLM class that shares vocab and model with base instance (for multithreaded decoding)
+  NeuralLM(const NeuralLM& base)
+    : sharedModel(base.sharedModel),
+      ngram_size(base.ngram_size),
+      normalization(base.normalization),
+      weight(base.weight),
+      map_digits(base.map_digits),
+      width(base.width),
+      prop(*sharedModel->getModel(), 1),
+      vocab(sharedModel->getVocabulary()) {
     prop.resize();
+
+    START_ID = vocab->lookup_word("<s>");
+    NULL_ID = vocab->lookup_word("<null>");
   }
 
   void set_normalization(bool value) {
@@ -141,7 +132,7 @@ class neuralLM {
   }
 
   void set_log_base(double value) {
-    weight = 1./log(value);
+    weight = 1 / log(value);
   }
 
   void set_map_digits(char value) {
@@ -154,16 +145,16 @@ class neuralLM {
   }
 
   shared_ptr<Vocabulary> get_vocabulary() const {
-    return cache.vocab;
+    return vocab;
   }
 
   Vocabulary get_vocab() const {
-    return *cache.vocab;
+    return *vocab;
   }
 
   int lookup_input_word(const string &word) const {
     if (!map_digits) {
-      return cache.vocab->lookup_word(word);
+      return vocab->lookup_word(word);
     }
 
     string mapped_word(word);
@@ -173,7 +164,7 @@ class neuralLM {
       }
     }
 
-    return cache.vocab->lookup_word(mapped_word);
+    return vocab->lookup_word(mapped_word);
   }
 
   int lookup_word(const string &word) const {
@@ -182,7 +173,7 @@ class neuralLM {
 
   int lookup_output_word(const string &word) const {
     if (!map_digits) {
-      return cache.vocab->lookup_word(word);
+      return vocab->lookup_word(word);
     }
 
     string mapped_word(word);
@@ -192,23 +183,17 @@ class neuralLM {
       }
     }
 
-    return cache.vocab->lookup_word(mapped_word);
+    return vocab->lookup_word(mapped_word);
   }
 
-  Eigen::Matrix<int,Eigen::Dynamic,1> &staging_ngram() {
-    return ngram;
+  void clear_cache() {
+    cache.clear();
   }
 
-  double lookup_from_staging() {
-    return lookup_ngram(ngram);
-  }
+  double score_ngram(const vector<int>& query) {
+    assert(query.size() == ngram_size);
 
-  template <typename Derived>
-  double lookup_ngram(const Eigen::MatrixBase<Derived> &ngram) {
-    assert (ngram.rows() == ngram_size);
-    assert (ngram.cols() == 1);
-
-    double cached = cache.lookup_cache(ngram);
+    double cached = cache.lookup(query);
     if (cached != 0) {
       return cached;
     }
@@ -224,14 +209,19 @@ class neuralLM {
     mkl_set_num_threads(1);
 #endif
 
-    prop.fProp(ngram.col(0));
+    VectorInt ngram(query.size());
+    for (size_t i = 0; i < query.size(); ++i) {
+      ngram(i) = query[i];
+    }
 
-    int output = ngram(ngram_size-1, 0);
+    prop.fProp(ngram);
+
+    int output = ngram(ngram_size - 1, 0);
     double log_prob;
 
     start_timer(3);
     if (normalization) {
-      Eigen::Matrix<double,Eigen::Dynamic,1> scores(cache.vocab->size());
+      Eigen::Matrix<double,Eigen::Dynamic,1> scores(vocab->size());
       prop.output_layer_node.param->fProp(prop.second_hidden_activation_node.fProp_matrix, scores);
       double logz = logsum(scores.col(0));
       log_prob = weight * (scores(output, 0) - logz);
@@ -241,7 +231,7 @@ class neuralLM {
     }
     stop_timer(3);
 
-    cache.store_cache(ngram, log_prob);
+    cache.store(query, log_prob);
 
 #ifndef WITH_THREADS
 #ifdef __INTEL_MKL__
@@ -266,16 +256,16 @@ class neuralLM {
 
     if (normalization) {
       Eigen::Matrix<double,Eigen::Dynamic,Eigen::Dynamic> scores(
-          cache.vocab->size(), ngram.cols());
+          vocab->size(), ngram.cols());
       prop.output_layer_node.param->fProp(
           prop.second_hidden_activation_node.fProp_matrix, scores);
 
       // And softmax and loss
       Matrix<double,Dynamic,Dynamic> output_probs(
-          cache.nn.vocab_size, ngram.cols());
+          vocab->size(), ngram.cols());
       double minibatch_log_likelihood;
       SoftmaxLogLoss().fProp(
-          scores.leftCols(ngram.cols()), ngram.row(cache.nn.ngram_size-1),
+          scores.leftCols(ngram.cols()), ngram.row(ngram_size - 1),
           output_probs, minibatch_log_likelihood);
 
       for (int j = 0; j < ngram.cols(); j++) {
@@ -291,35 +281,22 @@ class neuralLM {
     }
   }
 
-  double lookup_ngram(const int *ngram_a, int n) {
-    for (int i = 0; i < ngram_size; i++) {
-      if (i - ngram_size + n < 0) {
-        if (ngram_a[0] == start) {
-          ngram(i) = start;
-        } else {
-          ngram(i) = null;
-        }
+  double lookup_ngram(const vector<int>& query) {
+    auto start_time = GetTime();
+    vector<int> ngram;
+    for (int i = 0; i < ngram_size; ++i) {
+      if (i < ngram_size - query.size()) {
+        ngram.push_back(query[0] == START_ID ? START_ID : NULL_ID);
       } else {
-        ngram(i) = ngram_a[i - ngram_size + n];
+        ngram.push_back(query[i - ngram_size + query.size()]);
       }
     }
-    return lookup_ngram(ngram);
-  }
 
-  double lookup_ngram(const vector<int> &ngram_v) {
-    return lookup_ngram(ngram_v.data(), ngram_v.size());
+    return score_ngram(ngram);
   }
 
   int get_order() const {
     return ngram_size;
-  }
-
-   void set_cache(size_t cache_size) {
-    cache.set_cache(cache_size);
-  }
-
-  double cache_hit_rate() {
-    return static_cast<double>(cache.cache_hits) / cache.cache_lookups;
   }
 };
 

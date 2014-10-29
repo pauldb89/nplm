@@ -58,9 +58,8 @@ int main(int argc, char *argv[]) {
 
   ///// Create language model
 
-  neuralLM lm(config.model_input_file);
+  NeuralLM lm(config.model_input_file);
   lm.set_normalization(config.normalization);
-  lm.set_cache(1048576);
   config.ngram_size = lm.get_order();
   size_t minibatch_size = config.minibatch_size;
   lm.set_width(minibatch_size);
