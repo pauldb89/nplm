@@ -28,6 +28,10 @@ int Vocabulary::insert_word(const string& word) {
   return ret.first->second;
 }
 
+string Vocabulary::lookup_id(int word_id) const {
+  return words[word_id];
+}
+
 int Vocabulary::size() const {
   return words.size();
 }

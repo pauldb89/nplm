@@ -25,6 +25,10 @@ BOOST=/home/paulb/mylibs/boost-1.55.0
 # Where to find Boost header files
 BOOST_INC=$(BOOST)/include
 
+### Cdec.
+CDEC=/home/paulb/workspace/cdec
+CDEC_FLAGS=-I$(CDEC)/decoder -I$(CDEC)/utils
+
 ### Optional libraries.
 
 # To disable multithreading, comment out the line below:
@@ -55,9 +59,10 @@ BOOST_LIB_SUFFIX=
 
 BOOST_CFLAGS=-I$(BOOST_INC)
 BOOST_LDFLAGS=
+BOOST_LDLIBS+=-lboost_system$(BOOST_LIB_SUFFIX) -lboost_filesystem$(BOOST_LIB_SUFFIX) -lboost_serialization$(BOOST_LIB_SUFFIX) -lboost_program_options$(BOOST_LIB_SUFFIX)
 ifdef USE_CHRONO
   BOOST_CFLAGS+=-DUSE_CHRONO
-  BOOST_LDLIBS+=-lboost_system$(BOOST_LIB_SUFFIX) -lboost_chrono$(BOOST_LIB_SUFFIX)
+  BOOST_LDLIBS+=-lboost_chrono$(BOOST_LIB_SUFFIX)
 endif
 ifdef BOOST_LDLIBS
   BOOST_LDFLAGS+=-L$(BOOST_LIB) -Wl,-rpath -Wl,$(BOOST_LIB)
@@ -121,6 +126,7 @@ RANLIB=ranlib
 BINS=trainNeuralNetwork testNeuralNetwork testNeuralLM prepareNeuralTM
 LIBS=libneuralLM.a libneuralLM.so
 OBJS=context_extractor.o corpus_utils.o minibatch_extractor.o model.o util.o vocabulary.o
+CDEC_OBJS=cdec_wrapper.o cdec_nplm_mapper.o cdec_state_converter_base.o cdec_state_converter.o cdec_rule_converter.o create_ff.o query_cache.o lm_features.o
 
 all: $(BINS) $(LIBS)
 
@@ -134,10 +140,10 @@ install: all
 	cp $(LIBS) ../lib
 
 %.o: %.cpp
-	$(CXX) -c $(ALL_CFLAGS) $< -o $@
+	$(CXX) -c $(ALL_CFLAGS) $(CDEC_FLAGS) $< -o $@
 
 shared/%.o: %.cpp
-	$(CXX) -c -fPIC $(ALL_CFLAGS) $< -o $@
+	$(CXX) -c -fPIC $(ALL_CFLAGS) $(CDEC_FLAGS) $< -o $@
 
 trainNeuralNetwork: trainNeuralNetwork.o $(OBJS)
 	$(CXX) $(ALL_LDFLAGS) $^ $(ALL_LDLIBS) -o $@
@@ -156,7 +162,7 @@ libneuralLM.a: neuralLM.o $(OBJS)
 	$(AR) rv $@ $^
 	$(RANLIB) $@
 
-libneuralLM.so: $(addprefix shared/,neuralLM.o $(OBJS))
+libneuralLM.so: $(addprefix shared/,neuralLM.o $(OBJS) $(CDEC_OBJS))
 	$(CXX) -shared $(ALL_LDFLAGS) $^ $(ALL_LDLIBS) -o $@
 
 python/nplm.cpp: python/nplm.pyx

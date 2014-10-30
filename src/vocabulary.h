@@ -13,6 +13,8 @@ class Vocabulary {
  public:
   Vocabulary();
 
+  string lookup_id(int word_id) const;
+
   int lookup_word(const string &word) const;
 
   int insert_word(const string &word);

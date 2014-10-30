@@ -223,6 +223,30 @@ class NeuralLM {
     cache.write(filename);
   }
 
+  double getScore(const vector<int>& query) {
+    VectorInt ngram(query.size());
+    for (size_t i = 0; i < query.size(); ++i) {
+      ngram(i) = query[i];
+    }
+
+    prop.fProp(ngram);
+
+    int output = ngram(ngram_size - 1, 0);
+    double log_prob;
+
+    if (normalization) {
+      Eigen::Matrix<double,Eigen::Dynamic,1> scores(vocab->size());
+      prop.output_layer_node.param->fProp(prop.second_hidden_activation_node.fProp_matrix, scores);
+      double logz = logsum(scores.col(0));
+      log_prob = weight * (scores(output, 0) - logz);
+    } else {
+      log_prob = weight * prop.output_layer_node.param->fProp(
+          prop.second_hidden_activation_node.fProp_matrix, output, 0);
+    }
+
+    return log_prob;
+  }
+
   double score_ngram(const vector<int>& query) {
     assert(query.size() == ngram_size);
 
@@ -242,27 +266,7 @@ class NeuralLM {
     mkl_set_num_threads(1);
 #endif
 
-    VectorInt ngram(query.size());
-    for (size_t i = 0; i < query.size(); ++i) {
-      ngram(i) = query[i];
-    }
-
-    prop.fProp(ngram);
-
-    int output = ngram(ngram_size - 1, 0);
-    double log_prob;
-
-    start_timer(3);
-    if (normalization) {
-      Eigen::Matrix<double,Eigen::Dynamic,1> scores(vocab->size());
-      prop.output_layer_node.param->fProp(prop.second_hidden_activation_node.fProp_matrix, scores);
-      double logz = logsum(scores.col(0));
-      log_prob = weight * (scores(output, 0) - logz);
-    } else {
-      log_prob = weight * prop.output_layer_node.param->fProp(
-          prop.second_hidden_activation_node.fProp_matrix, output, 0);
-    }
-    stop_timer(3);
+    double log_prob = getScore(query);
 
     cache.store(query, log_prob);
 
