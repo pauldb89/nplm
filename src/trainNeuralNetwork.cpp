@@ -41,7 +41,7 @@ typedef unordered_map<VectorInt, double> VectorMap;
 void EvaluateModel(
     const Config& config, const model& nn, propagator& prop_validation,
     const shared_ptr<Corpus>& test_corpus, const shared_ptr<Vocabulary>& vocab,
-    int epoch, double& current_learning_rate, double& current_validation_ll) {
+    double& current_learning_rate, double& current_validation_ll) {
   if (test_corpus->size() > 0) {
     double log_likelihood = 0.0;
     Matrix<double,Dynamic,Dynamic> scores(vocab->size(), config.minibatch_size);
@@ -83,7 +83,7 @@ void EvaluateModel(
     cerr << "           perplexity:     " << exp(-log_likelihood / test_corpus->size()) << endl;
 
     // If the validation perplexity decreases, halve the learning rate.
-    if (epoch > 0 && log_likelihood < current_validation_ll) {
+    if (current_validation_ll != 0 && log_likelihood < current_validation_ll) {
       current_learning_rate /= 2;
     } else {
       current_validation_ll = log_likelihood;
@@ -356,7 +356,7 @@ int main(int argc, char** argv) {
         if (batch % 200000 == 0) {
           EvaluateModel(
               config, nn, prop_validation, test_corpus, vocab,
-              epoch, current_learning_rate, current_validation_ll);
+              current_learning_rate, current_validation_ll);
           cerr << "Current learning rate: " << current_learning_rate << endl;
           cerr << "Training minibatches: " << endl;
         }
@@ -484,7 +484,7 @@ int main(int argc, char** argv) {
 
     EvaluateModel(
         config, nn, prop_validation, test_corpus, vocab,
-        epoch, current_learning_rate, current_validation_ll);
+        current_learning_rate, current_validation_ll);
   }
 
   return 0;
