@@ -76,6 +76,31 @@ class NeuralLMCache {
     cache.clear();
   }
 
+  void read(const string& filename) {
+    ifstream fin(filename);
+    size_t key_size;
+    while (fin >> key_size) {
+      double value;
+      vector<int> key(key_size);
+      for (size_t i = 0; i < key_size; ++i) {
+        fin >> key[i];
+      }
+      fin >> value;
+      cache[key] = value;
+    }
+  }
+
+  void write(const string& filename) const {
+    ofstream fout(filename);
+    for (const auto& entry: cache) {
+      fout << entry.first.size() << " ";
+      for (int word_id: entry.first) {
+        fout << word_id << " ";
+      }
+      fout << entry.second << "\n";
+    }
+  }
+
  private:
   unordered_map<vector<int>, double, boost::hash<vector<int>>> cache;
 };
@@ -188,6 +213,14 @@ class NeuralLM {
 
   void clear_cache() {
     cache.clear();
+  }
+
+  void load_cache(const string& filename) {
+    cache.read(filename);
+  }
+
+  void save_cache(const string& filename) const {
+    cache.write(filename);
   }
 
   double score_ngram(const vector<int>& query) {
